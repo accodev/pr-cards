@@ -49,6 +49,11 @@ test('draws references in text and in a numbers column with a dot, a link and th
   expect(await ui.find({ type: 'Text', text: '✖ e2e / it-receipts' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '● changes requested by you' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '1 open review thread' })).toBeDefined()
+  const links = (await ui.findAll({ type: 'Link' })).map((l) => l.props.href)
+  expect(links).toContain('https://github.com/lgreen') // the author
+  expect(links).toContain('https://github.com/mrossi') // a reviewer
+  expect(links).toContain(PR.url)
+  expect(await ui.find({ type: 'Text', text: 'ctrl+click opens a link' })).toBeDefined()
 
   expect(await ui.find({ type: 'Text', text: 'OPEN THREADS 1' })).toBeUndefined()
   const link = await ui.find({ type: 'Markdown', text: '[#1319](https://github.com/acme/pos-api/pull/1319)' })
