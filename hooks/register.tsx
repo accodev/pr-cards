@@ -312,43 +312,90 @@ export const register: Register = (on) => {
     const names = (logins: string[]) => logins.map(who).join(', ')
     const badge = (item: Item) => span(` ${STATE_WORD[item.state] ?? item.state} `, 'ansi256(0)', { backgroundColor: color(item), bold: true })
 
+    // A card is drawn as text rows padded to its full width: a Box background paints only the cells
+    // that hold text, so the transcript under a short row would show through.
+    type Seg = { text: string; color?: string; bold?: boolean; underline?: boolean; backgroundColor?: string }
+    const BG = 'ansi256(0)'
+    const INNER = CARD_WIDTH - 4 // two border cells and one blank cell on each side
+    const seg = (text: string, c?: string, extra: Omit<Seg, 'text' | 'color'> = {}): Seg => ({ text, color: c, ...extra })
+    const fill = (segs: Seg[]): RenderElement[] => {
+      const rows: Seg[][] = [[]]
+      let used = 0
+      for (const s of segs) {
+        for (const word of s.text.split(/(?<=\s)/)) {
+          let rest = word
+          while (rest) {
+            if (used + rest.trimEnd().length > INNER && used > 0) {
+              rows.push([])
+              used = 0
+              rest = rest.trimStart()
+              if (!rest) break
+            }
+            const take = rest.slice(0, INNER - used)
+            rows[rows.length - 1]!.push({ ...s, text: take })
+            used += take.length
+            rest = rest.slice(take.length)
+          }
+        }
+      }
+      const same = (a: Seg, b: Seg) => a.color === b.color && a.bold === b.bold && a.underline === b.underline && a.backgroundColor === b.backgroundColor
+      const merged = rows.map((row) => row.reduce<Seg[]>((out, s) => {
+        const last = out[out.length - 1]
+        if (last && same(last, s)) last.text += s.text
+        else out.push({ ...s })
+        return out
+      }, []))
+      return merged.map((row) => {
+        const width = row.reduce((n, s) => n + s.text.length, 0)
+        return Text({
+          backgroundColor: BG,
+          children: [
+            ' ',
+            ...row.map((s) => Text({ color: s.color, bold: s.bold, underline: s.underline, backgroundColor: s.backgroundColor ?? BG, children: [s.text] })),
+            ' '.repeat(Math.max(0, INNER - width) + 1),
+          ],
+        })
+      })
+    }
+
     // The card's rows under the title, as the mockup: who and when, size, checks, reviews, threads.
-    const facts = (item: Item): RenderElement[] => {
-      if (item.kind === 'issue') return [line([`@${item.author} · ${item.when} · ${item.comments} comments`], C.dim)]
+    const facts = (item: Item): Seg[][] => {
+      if (item.kind === 'issue') return [[seg(`@${item.author} · ${item.when} · ${item.comments} comments`, C.dim)]]
       const c = item.checks!
-      const rows: RenderElement[] = [
-        line([`@${item.author} · ${item.when} · `, span(`+${item.additions}`, C.open), ' ', span(`−${item.deletions}`, C.closed), ` · ${item.changedFiles} files`], C.dim),
+      const rows: Seg[][] = [
+        [seg(`@${item.author} · ${item.when} · `, C.dim), seg(`+${item.additions}`, C.open), seg(' '), seg(`−${item.deletions}`, C.closed), seg(` · ${item.changedFiles} files`, C.dim)],
       ]
       if (c.total) {
-        rows.push(line([
-          span('✔', C.open), ` ${c.ok} of ${c.total} checks`,
-          ...(item.failing?.length ? [' · ', span(`✖ ${item.failing[0]}${item.failing.length > 1 ? ` +${item.failing.length - 1}` : ''}`, C.closed)] : []),
-          ...(c.pending ? [' · ', span(`● ${c.pending} running`, C.warn)] : []),
-        ]))
+        rows.push([
+          seg('✔', C.open), seg(` ${c.ok} of ${c.total} checks`),
+          ...(item.failing?.length ? [seg(' · '), seg(`✖ ${item.failing[0]}${item.failing.length > 1 ? ` +${item.failing.length - 1}` : ''}`, C.closed)] : []),
+          ...(c.pending ? [seg(' · '), seg(`● ${c.pending} running`, C.warn)] : []),
+        ])
       }
-      const reviews: Part[] = []
-      if (item.approvedBy?.length) reviews.push(span('✔', C.open), ` approved by ${names(item.approvedBy)}`)
-      if (item.changesBy?.length) reviews.push(...(reviews.length ? [' · '] : []), span(`● changes requested by ${names(item.changesBy)}`, C.warn))
-      rows.push(reviews.length ? line(reviews) : line([REVIEW_WORD[item.review ?? ''] ?? 'no reviews yet'], C.dim))
-      if (item.threads?.length) rows.push(line([`${item.threads.length} open review thread${item.threads.length === 1 ? '' : 's'}`]))
+      const reviews: Seg[] = []
+      if (item.approvedBy?.length) reviews.push(seg('✔', C.open), seg(` approved by ${names(item.approvedBy)}`))
+      if (item.changesBy?.length) reviews.push(...(reviews.length ? [seg(' · ')] : []), seg(`● changes requested by ${names(item.changesBy)}`, C.warn))
+      rows.push(reviews.length ? reviews : [seg(REVIEW_WORD[item.review ?? ''] ?? 'no reviews yet', C.dim)])
+      if (item.threads?.length) rows.push([seg(`${item.threads.length} open review thread${item.threads.length === 1 ? '' : 's'}`)])
       return rows
     }
 
     // Opens upward: rows drawn after the reference would paint over a card below it.
-    const popup = (children: RenderElement[], border: string) =>
+    const popup = (rows: Seg[][], border: string) =>
       Box({
         position: 'absolute', bottom: 1, left: 0, display: 'none', hover: { display: 'flex' },
-        flexDirection: 'column', width: CARD_WIDTH, borderStyle: 'round', borderColor: border, backgroundColor: 'ansi256(0)', paddingX: 1, children,
+        flexDirection: 'column', width: CARD_WIDTH, borderStyle: 'round', borderColor: border, backgroundColor: BG,
+        children: rows.flatMap(fill),
       })
 
     const card = (item: Item) =>
       popup([
-        line([badge(item), span(`  ${item.repo} #${item.number}`, C.dim)]),
-        Text({ bold: true, children: [item.title] }),
+        [seg(` ${STATE_WORD[item.state] ?? item.state} `, 'ansi256(0)', { backgroundColor: color(item), bold: true }), seg(`  ${item.repo} #${item.number}`, C.dim)],
+        [seg(item.title, undefined, { bold: true })],
         ...facts(item),
-        span(short(item.url), C.link, { underline: true }),
-        span('─'.repeat(CARD_WIDTH - 4), C.dim),
-        span('click the number expands · ctrl+click opens it', C.dim),
+        [seg(short(item.url), C.link, { underline: true })],
+        [seg('─'.repeat(INNER), C.dim)],
+        [seg('click the number expands · ctrl+click opens it', C.dim)],
       ], C.dim)
 
     // A reference where the text has it: the state dot, the number as a link, the card on hover.
@@ -359,7 +406,7 @@ export const register: Register = (on) => {
       const label = item
         ? Markdown({ key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})`, pressableLinks: [item.url], onLinkPress: (link) => toggle(link.href) })
         : span(ref.label, C.link, { underline: true })
-      const pop = item ? [card(item)] : entry?.error ? [popup([line([entry.error], C.closed)], C.closed)] : []
+      const pop = item ? [card(item)] : entry?.error ? [popup([[seg(entry.error, C.closed)]], C.closed)] : []
       return Box({ key: `${id}-ref-${serial++}`, flexShrink: 0, children: [dot, label, ...pop] })
     }
 

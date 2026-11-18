@@ -93,6 +93,15 @@ try:
     dump("2-hover")
     hovered = "#1306" in text() and "checks" in text()
     print("hover card:", hovered)
+    # Every cell inside the card's border has a background, so nothing under it shows through.
+    with lock:
+        lines = screen.display
+        top = next(i for i, l in enumerate(lines) if "╭" in l)
+        bottom = next(i for i, l in enumerate(lines) if "╰" in l and i > top)
+        left, right = lines[top].index("╭"), lines[top].index("╮")
+        holes = [(r, c) for r in range(top + 1, bottom) for c in range(left + 1, right) if screen.buffer[r][c].bg == "default"]
+    print("card cells without background:", len(holes), holes[:5])
+    hovered = hovered and not holes
     proc.write(f"\x1b[<35;{x};{min(ROWS, y + 3)}M")  # the pointer leaves
     time.sleep(1)
     proc.write(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m")  # a plain click
