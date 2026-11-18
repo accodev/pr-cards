@@ -17,7 +17,8 @@ type Item = {
   changedFiles?: number
   review?: string
   checks?: Checks
-  failing?: string[]
+  // The failing checks, each with the page of its run.
+  failing?: { name: string; url?: string }[]
   approvedBy?: string[]
   changesBy?: string[]
   threads?: { path: string; line: number | null }[]
@@ -194,7 +195,7 @@ const FIELDS = `
   __typename
   ... on PullRequest { number title url state isDraft author { login } additions deletions changedFiles reviewDecision createdAt mergedAt closedAt
     statusCheckRollup { contexts(first: 100) { totalCount checkRunCountsByState { state count } statusContextCountsByState { state count }
-      nodes { __typename ... on CheckRun { name conclusion } ... on StatusContext { context state } } } }
+      nodes { __typename ... on CheckRun { name conclusion detailsUrl } ... on StatusContext { context state targetUrl } } } }
     latestReviews(first: 20) { nodes { state author { login } } }
     reviewThreads(first: 100) { nodes { isResolved path line } }
     files(first: 4) { nodes { path additions deletions } } }
@@ -241,7 +242,7 @@ type Raw = {
   statusCheckRollup?: {
     contexts: {
       totalCount: number; checkRunCountsByState?: Count[]; statusContextCountsByState?: Count[]
-      nodes?: { __typename: string; name?: string; conclusion?: string | null; context?: string; state?: string }[]
+      nodes?: { __typename: string; name?: string; conclusion?: string | null; detailsUrl?: string | null; context?: string; state?: string; targetUrl?: string | null }[]
     }
   } | null
   latestReviews?: { nodes: { state: string; author?: { login: string } | null }[] }
@@ -273,7 +274,7 @@ function toItem(repo: string, raw: Raw): Item {
   const total = contexts?.totalCount ?? 0
   const ok = sum(OK)
   const failed = sum(FAILED)
-  const failing = (contexts?.nodes ?? []).filter((c) => FAILED.includes(c.conclusion ?? c.state ?? '')).map((c) => c.name ?? c.context ?? '?')
+  const failing = (contexts?.nodes ?? []).filter((c) => FAILED.includes(c.conclusion ?? c.state ?? '')).map((c) => ({ name: c.name ?? c.context ?? '?', url: c.detailsUrl ?? c.targetUrl ?? undefined }))
   const reviews = raw.latestReviews?.nodes ?? []
   const by = (s: string) => reviews.filter((r) => r.state === s).map((r) => r.author?.login ?? 'ghost')
   const state = raw.state === 'OPEN' && raw.isDraft ? 'DRAFT' : raw.state
@@ -318,6 +319,14 @@ export const register: Register = (on) => {
     const profile = (login: string) => `https://github.com/${login}`
     // `@login` linked to the profile; the signed-in user reads "you", unlinked.
     const person = (login: string, c?: string): Seg => (login === viewer ? { text: 'you', color: c } : { text: `@${login}`, color: c ?? C.link, underline: true, href: profile(login) })
+    // A run that ctrl+click opens: underlined in its own color, plain text when there is no target.
+    const linked = (text: string, href: string | undefined, c?: string): Seg => (href ? { text, color: c, underline: true, href } : { text, color: c })
+    // The title with its `#123`, `owner/repo#123` and GitHub URLs as links; GitHub sends an issue URL of a PR to the PR.
+    const titleSegs = (item: Item): Seg[] =>
+      pieces(item.title).map((p) =>
+        'ref' in p
+          ? { text: p.ref.label, color: C.link, bold: true, underline: true, href: `https://github.com/${p.ref.repo ?? item.repo}/issues/${p.ref.number}` }
+          : { text: p.text, bold: true })
     const people = (logins: string[], c?: string): Seg[] => logins.flatMap((l, i) => [...(i ? [{ text: ', ', color: c }] : []), person(l, c)])
     // A fixed dark gray (#303030), as the mockup's card: palette black is the terminal background in
     // most dark schemes, so a card filled with it shows no edge. Mods get no theme background key.
@@ -375,15 +384,17 @@ export const register: Register = (on) => {
 
     // The card's rows under the title, as the mockup: who and when, size, checks, reviews, threads.
     const facts = (item: Item): Seg[][] => {
-      if (item.kind === 'issue') return [[person(item.author), seg(` · ${item.when} · ${item.comments} comments`, C.dim)]]
+      if (item.kind === 'issue') return [[person(item.author), seg(` · ${item.when} · `, C.dim), linked(`${item.comments} comments`, item.url, C.dim)]]
       const c = item.checks!
       const rows: Seg[][] = [
-        [person(item.author), seg(` · ${item.when} · `, C.dim), seg(`+${item.additions}`, C.open), seg(' '), seg(`−${item.deletions}`, C.closed), seg(` · ${item.changedFiles} files`, C.dim)],
+        [person(item.author), seg(` · ${item.when} · `, C.dim), seg(`+${item.additions}`, C.open), seg(' '), seg(`−${item.deletions}`, C.closed), seg(' · ', C.dim), linked(`${item.changedFiles} files`, `${item.url}/files`, C.dim)],
       ]
       if (c.total) {
         rows.push([
-          seg('✔', C.open), seg(` ${c.ok} of ${c.total} checks`),
-          ...(item.failing?.length ? [seg(' · '), seg(`✖ ${item.failing[0]}${item.failing.length > 1 ? ` +${item.failing.length - 1}` : ''}`, C.closed)] : []),
+          seg('✔', C.open), seg(' '), linked(`${c.ok} of ${c.total} checks`, `${item.url}/checks`),
+          ...(item.failing?.length
+            ? [seg(' · '), seg('✖ ', C.closed), linked(item.failing[0]!.name, item.failing[0]!.url, C.closed), ...(item.failing.length > 1 ? [seg(` +${item.failing.length - 1}`, C.closed)] : [])]
+            : []),
           ...(c.pending ? [seg(' · '), seg(`● ${c.pending} running`, C.warn)] : []),
         ])
       }
@@ -391,7 +402,7 @@ export const register: Register = (on) => {
       if (item.approvedBy?.length) reviews.push(seg('✔', C.open), seg(' approved by '), ...people(item.approvedBy))
       if (item.changesBy?.length) reviews.push(...(reviews.length ? [seg(' · ')] : []), seg('● changes requested by ', C.warn), ...people(item.changesBy, C.warn))
       rows.push(reviews.length ? reviews : [seg(REVIEW_WORD[item.review ?? ''] ?? 'no reviews yet', C.dim)])
-      if (item.threads?.length) rows.push([seg(`${item.threads.length} open review thread${item.threads.length === 1 ? '' : 's'}`)])
+      if (item.threads?.length) rows.push([linked(`${item.threads.length} open review thread${item.threads.length === 1 ? '' : 's'}`, item.url)])
       return rows
     }
 
@@ -405,8 +416,8 @@ export const register: Register = (on) => {
 
     const card = (item: Item) =>
       popup([
-        [seg(` ${STATE_WORD[item.state] ?? item.state} `, 'ansi256(0)', { backgroundColor: color(item), bold: true }), seg(`  ${item.repo} #${item.number}`, C.dim)],
-        [seg(item.title, undefined, { bold: true })],
+        [seg(` ${STATE_WORD[item.state] ?? item.state} `, 'ansi256(0)', { backgroundColor: color(item), bold: true }), seg('  '), linked(item.repo, `https://github.com/${item.repo}`, C.dim), seg(' '), linked(`#${item.number}`, item.url, C.dim)],
+        titleSegs(item),
         ...facts(item),
         [seg(short(item.url), C.link, { underline: true, href: item.url })],
         [seg('─'.repeat(INNER), C.dim)],
@@ -506,7 +517,7 @@ export const register: Register = (on) => {
         item.kind === 'pr' && c
           ? [
               column(`CHECKS ${c.ok}/${c.total}`, [
-                ...(item.failing ?? []).slice(0, 4).map((n) => line([span('✖', C.closed), ` ${n}`])),
+                ...(item.failing ?? []).slice(0, 4).map((f) => line([span('✖', C.closed), ' ', f.url ? Link({ href: f.url, children: [span(f.name, undefined, { underline: true })] }) : f.name])),
                 ...(c.pending ? [line([span('●', C.warn), ` ${c.pending} running`])] : []),
                 line([span('✔', C.open), ` ${c.ok} passed`]),
               ]),

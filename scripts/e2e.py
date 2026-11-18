@@ -148,7 +148,17 @@ try:
         time.sleep(2)
         dump("5-list-hover")
         card = "Draft" in text() and "#1320" in text()
-        print("list hover card:", card)
+        with lock:
+            targets = set(m.decode("utf-8", "replace") for m in re.findall(rb"\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]+)", bytes(raw)))
+        pr = "https://github.com/fiskaltrust/market-it/pull/1320"
+        card_links = {
+            "repo": "https://github.com/fiskaltrust/market-it" in targets,
+            "files": pr + "/files" in targets,
+            "checks": pr + "/checks" in targets,
+            "failing run": any("/actions/runs/" in t or "/runs/" in t for t in targets),
+        }
+        print("list hover card:", card, "links:", card_links)
+        card = card and all(card_links.values())
         clicked = clicked and card
 finally:
     proc.write("\x03")
