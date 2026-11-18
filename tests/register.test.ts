@@ -4,12 +4,12 @@ const PR = {
   __typename: 'PullRequest', number: 1319, title: 'fix: round VAT per line', url: 'https://github.com/acme/pos-api/pull/1319',
   state: 'OPEN', isDraft: false, author: { login: 'lgreen' }, additions: 184, deletions: 37, changedFiles: 9, reviewDecision: 'CHANGES_REQUESTED',
   createdAt: new Date(Date.now() - 2 * 86_400_000).toISOString(), mergedAt: null, closedAt: null,
-  statusCheckRollup: { contexts: { totalCount: 2, checkRunCountsByState: [{ state: 'SUCCESS', count: 1 }, { state: 'FAILURE', count: 1 }], statusContextCountsByState: [], nodes: [{ __typename: 'CheckRun', name: 'build', conclusion: 'SUCCESS' }, { __typename: 'CheckRun', name: 'e2e / it-receipts', conclusion: 'FAILURE' }] } },
+  statusCheckRollup: { contexts: { totalCount: 2, checkRunCountsByState: [{ state: 'SUCCESS', count: 1 }, { state: 'FAILURE', count: 1 }], statusContextCountsByState: [], nodes: [{ __typename: 'CheckRun', name: 'build', conclusion: 'SUCCESS' }, { __typename: 'CheckRun', name: 'e2e / it-receipts', conclusion: 'FAILURE', detailsUrl: 'https://github.com/acme/pos-api/actions/runs/7/job/9' }] } },
   latestReviews: { nodes: [{ state: 'APPROVED', author: { login: 'mrossi' } }, { state: 'CHANGES_REQUESTED', author: { login: 'me' } }] },
   reviewThreads: { nodes: [{ isResolved: false, path: 'src/Vat.cs', line: 88 }, { isResolved: true, path: 'src/A.cs', line: 1 }] },
   files: { nodes: [{ path: 'src/Vat.cs', additions: 92, deletions: 21 }] },
 }
-const MERGED = { ...PR, number: 1307, url: 'https://github.com/acme/pos-api/pull/1307', state: 'MERGED', mergedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(), statusCheckRollup: null }
+const MERGED = { ...PR, number: 1307, title: 'feat: export (#1250, other/lib#3)', url: 'https://github.com/acme/pos-api/pull/1307', state: 'MERGED', mergedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(), statusCheckRollup: null }
 const ISSUE = { __typename: 'Issue', number: 1250, title: 'Till says what is missing', url: 'https://github.com/acme/pos-api/issues/1250', state: 'OPEN', stateReason: null, author: { login: 'kpark' }, comments: { totalCount: 4 }, createdAt: PR.createdAt, closedAt: null }
 
 const message = (text: string) => ({
@@ -46,14 +46,21 @@ test('draws references in text and in a numbers column with a dot, a link and th
   // The card, drawn hidden until hovered.
   expect(await ui.find({ type: 'Text', text: ' Open ' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'fix: round VAT per line' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '✖ e2e / it-receipts' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'e2e / it-receipts' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '● changes requested by you' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '1 open review thread' })).toBeDefined()
   const links = (await ui.findAll({ type: 'Link' })).map((l) => l.props.href)
   expect(links).toContain('https://github.com/lgreen') // the author
   expect(links).toContain('https://github.com/mrossi') // a reviewer
   expect(links).toContain(PR.url)
+  expect(links).toContain('https://github.com/acme/pos-api') // the repo in the header
+  expect(links).toContain(`${PR.url}/files`)
+  expect(links).toContain(`${PR.url}/checks`)
+  expect(links).toContain('https://github.com/acme/pos-api/actions/runs/7/job/9') // the failing check's run
   expect(await ui.find({ type: 'Text', text: 'ctrl+click opens a link' })).toBeDefined()
+  // References inside a title are links too: same repo, then another repo.
+  expect(links).toContain('https://github.com/acme/pos-api/issues/1250')
+  expect(links).toContain('https://github.com/other/lib/issues/3')
 
   expect(await ui.find({ type: 'Text', text: 'OPEN THREADS 1' })).toBeUndefined()
   const link = await ui.find({ type: 'Markdown', text: '[#1319](https://github.com/acme/pos-api/pull/1319)' })
