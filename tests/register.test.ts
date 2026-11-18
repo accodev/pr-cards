@@ -39,8 +39,8 @@ test('links PRs and issues with their state icon, in text and in a numbers colum
     'Only [ #1319](https://github.com/acme/pos-api/pull/1319) is blocked ([ #1250](https://github.com/acme/pos-api/issues/1250)).\n\n' +
       '| # | State |\n|---|---|\n| [ 1307](https://github.com/acme/pos-api/pull/1307) | merged |\n\nSee `#42`.',
   )
-  expect(await ui.find({ type: 'Text', text: '  #1319 ✖ ' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '  #1250  ' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '#1319' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '#1250' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'checks 1/2 · 1 failing' })).toBeDefined()
 
   expect(await ui.find({ type: 'Text', text: /^@lgreen/ })).toBeDefined() // the hover card, drawn hidden

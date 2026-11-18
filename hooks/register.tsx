@@ -246,9 +246,11 @@ export const register: Register = (on) => {
 
     const chip = ({ ref, entry }: (typeof entries)[number]) => {
       const item = entry?.item
-      const label = item ? ` ${icon(item)} #${item.number} ${checkGlyph(item.checks)} ` : ` #${ref.number} ${entry?.error ? '?' : '…'} `
+      // As the mockup draws it: a dot in the state's color, then the number as a link.
+      const dot = Text({ color: item ? color(item) : entry?.error ? C.closed : C.dim, children: ['⬤ '] })
+      const number = Text({ color: C.link, underline: true, hover: { bold: true }, children: [`#${ref.number}`] })
       const pop = item ? [card(item)] : entry?.error ? [errorCard(entry.error)] : []
-      return Box({ key: `${id}-${ref.repo ?? ''}-${ref.number}`, children: [Text({ color: item ? color(item) : C.dim, hover: { inverse: true }, children: [label] }), ...pop] })
+      return Box({ key: `${id}-${ref.repo ?? ''}-${ref.number}`, paddingX: 1, hover: { backgroundColor: 'ansi256(8)' }, children: [dot, number, ...pop] })
     }
 
     const panel = (item: Item) =>
