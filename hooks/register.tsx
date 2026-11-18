@@ -320,7 +320,7 @@ export const register: Register = (on) => {
     const BG = 'ansi256(236)'
     const INNER = CARD_WIDTH - 4 // two border cells and one blank cell on each side
     const seg = (text: string, c?: string, extra: Omit<Seg, 'text' | 'color'> = {}): Seg => ({ text, color: c, ...extra })
-    const fill = (segs: Seg[]): RenderElement[] => {
+    const fill = (segs: Seg[], border: string): RenderElement[] => {
       const rows: Seg[][] = [[]]
       let used = 0
       for (const s of segs) {
@@ -355,13 +355,17 @@ export const register: Register = (on) => {
         return Text({
           backgroundColor: BG,
           children: [
-            ' ',
+            Text({ color: border, backgroundColor: BG, children: ['│ '] }),
             ...row.map((s) => Text({ color: s.color, bold: s.bold, underline: s.underline, backgroundColor: s.backgroundColor ?? BG, children: [s.text] })),
-            ' '.repeat(Math.max(0, INNER - width) + 1),
+            ' '.repeat(Math.max(0, INNER - width)),
+            Text({ color: border, backgroundColor: BG, children: [' │'] }),
           ],
         })
       })
     }
+    // The frame is text too: a Box border's cells take no background.
+    const edge = (left: string, right: string, border: string) =>
+      Text({ color: border, backgroundColor: BG, children: [`${left}${'─'.repeat(CARD_WIDTH - 2)}${right}`] })
 
     // The card's rows under the title, as the mockup: who and when, size, checks, reviews, threads.
     const facts = (item: Item): Seg[][] => {
@@ -389,8 +393,8 @@ export const register: Register = (on) => {
     const popup = (rows: Seg[][], border: string) =>
       Box({
         position: 'absolute', bottom: 1, left: 0, display: 'none', hover: { display: 'flex' },
-        flexDirection: 'column', width: CARD_WIDTH, borderStyle: 'round', borderColor: border, backgroundColor: BG,
-        children: rows.flatMap(fill),
+        flexDirection: 'column', width: CARD_WIDTH,
+        children: [edge('╭', '╮', border), ...rows.flatMap((r) => fill(r, border)), edge('╰', '╯', border)],
       })
 
     const card = (item: Item) =>
