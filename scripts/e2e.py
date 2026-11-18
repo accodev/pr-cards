@@ -99,7 +99,8 @@ try:
         top = next(i for i, l in enumerate(lines) if "╭" in l)
         bottom = next(i for i, l in enumerate(lines) if "╰" in l and i > top)
         left, right = lines[top].index("╭"), lines[top].index("╮")
-        holes = [(r, c) for r in range(top + 1, bottom) for c in range(left + 1, right) if screen.buffer[r][c].bg == "default"]
+        # The whole rectangle, border rows and columns included.
+        holes = [(r, c) for r in range(top, bottom + 1) for c in range(left, right + 1) if screen.buffer[r][c].bg == "default"]
     print("card cells without background:", len(holes), holes[:5])
     hovered = hovered and not holes
     proc.write(f"\x1b[<35;{x};{min(ROWS, y + 3)}M")  # the pointer leaves
@@ -141,6 +142,9 @@ finally:
     time.sleep(0.5)
     proc.write("\x03")
     time.sleep(1)
-    if proc.isalive():
-        proc.terminate(force=True)
+    try:
+        if proc.isalive():
+            proc.terminate(force=True)
+    except OSError:
+        pass  # already exiting after the second ctrl+c
 sys.exit(0 if hovered and clicked else 3)
