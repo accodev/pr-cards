@@ -57,6 +57,19 @@ test('draws references in text and in a numbers column with a dot, a link and th
   expect(await ui.find({ type: 'Text', text: 'OPEN THREADS 1' })).toBeDefined()
 })
 
+test('wraps a card row whose word fills the row exactly', async ($, on) => {
+  const clock = mock.clock(on)
+  // 62 letters fill a card row; the space after them once looped forever and crashed the hooks worker.
+  const title = `${'a'.repeat(62)} b ${'c'.repeat(70)}`
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: { ...PR, title } } } }))))
+  const ui = await $.ui.mount(message('See #1319.'))
+  await clock.settle()
+  await clock.settle()
+  expect(await ui.find({ type: 'Text', text: 'a'.repeat(62) })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'b' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'c'.repeat(62) })).toBeDefined()
+})
+
 test('leaves a message without references to Claude Code', async ($, on) => {
   on('process.run', () => {
     throw new Error('gh must not run')

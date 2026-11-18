@@ -325,13 +325,16 @@ export const register: Register = (on) => {
         for (const word of s.text.split(/(?<=\s)/)) {
           let rest = word
           while (rest) {
-            if (used + rest.trimEnd().length > INNER && used > 0) {
+            const room = INNER - used
+            // A full row, or a word that does not fit after others: start a new row. Each pass takes at
+            // least one character, so the loop always ends.
+            if (room <= 0 || (used > 0 && rest.trimEnd().length > room)) {
               rows.push([])
               used = 0
               rest = rest.trimStart()
-              if (!rest) break
+              continue
             }
-            const take = rest.slice(0, INNER - used)
+            const take = rest.slice(0, room)
             rows[rows.length - 1]!.push({ ...s, text: take })
             used += take.length
             rest = rest.slice(take.length)
@@ -402,7 +405,8 @@ export const register: Register = (on) => {
     const reference = (ref: Ref) => {
       const entry = entryOf(ref)
       const item = entry?.item
-      const dot = span(`${DOT} `, item ? color(item) : entry?.error ? C.closed : C.dim)
+      // A gray filled dot is a draft; loading is hollow and a failed lookup a cross, so neither reads as a state.
+      const dot = item ? span(`${DOT} `, color(item)) : entry?.error ? span('✖ ', C.closed) : span('○ ', C.dim)
       const label = item
         ? Markdown({ key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})`, pressableLinks: [item.url], onLinkPress: (link) => toggle(link.href) })
         : span(ref.label, C.link, { underline: true })
