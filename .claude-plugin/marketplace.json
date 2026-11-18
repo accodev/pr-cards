@@ -1,0 +1,7 @@
+{
+  "name": "pr-cards",
+  "owner": { "name": "accodev" },
+  "plugins": [
+    { "name": "pr-cards", "source": "./", "description": "GitHub pull request chips with hover cards in the Claude Code transcript." }
+  ]
+}

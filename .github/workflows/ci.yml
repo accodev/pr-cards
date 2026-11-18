@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The mod API can change between releases: pin the Claude Code version the mod was tested on, and raise it on purpose.
+  CLAUDE_CODE_VERSION: 2.1.327
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Validate the plugin and its marketplace
+        run: claude plugin validate .
+
+      - name: Run the mod tests
+        run: claude plugin test .
+
