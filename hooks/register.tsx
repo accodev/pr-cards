@@ -315,7 +315,9 @@ export const register: Register = (on) => {
     // A card is drawn as text rows padded to its full width: a Box background paints only the cells
     // that hold text, so the transcript under a short row would show through.
     type Seg = { text: string; color?: string; bold?: boolean; underline?: boolean; backgroundColor?: string }
-    const BG = 'ansi256(0)'
+    // A fixed dark gray (#303030), as the mockup's card: palette black is the terminal background in
+    // most dark schemes, so a card filled with it shows no edge. Mods get no theme background key.
+    const BG = 'ansi256(236)'
     const INNER = CARD_WIDTH - 4 // two border cells and one blank cell on each side
     const seg = (text: string, c?: string, extra: Omit<Seg, 'text' | 'color'> = {}): Seg => ({ text, color: c, ...extra })
     const fill = (segs: Seg[]): RenderElement[] => {
