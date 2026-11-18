@@ -10,15 +10,22 @@ type Item = {
   // PR: OPEN | MERGED | CLOSED | DRAFT. Issue: OPEN | COMPLETED | NOT_PLANNED.
   state: string
   author: string
+  // `opened 2 days ago`, `merged 3 hours ago`...
+  when: string
   additions?: number
   deletions?: number
   changedFiles?: number
   review?: string
   checks?: Checks
+  failing?: string[]
+  approvedBy?: string[]
+  changesBy?: string[]
+  threads?: { path: string; line: number | null }[]
+  files?: { path: string; additions: number; deletions: number }[]
   comments?: number
 }
 type Entry = { item?: Item; error?: string; at: number; loading: boolean }
-type Ref = { match: string; index: number; repo: string | null; number: number; replace: (item: Item) => string }
+type Ref = { repo: string | null; number: number; label: string }
 
 const TTL_MS = 60_000
 const BATCH = 40
@@ -26,15 +33,12 @@ const BATCH = 40
 const REF = /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:pull|issues)\/(\d+)|(?<![\w[#/])(?:([\w.-]+\/[\w.-]+))?#(\d+)\b/g
 // A table column of bare numbers is a list of PRs or issues when its header says so.
 const NUMBER_HEADER = /^(#|pr|prs|pull|issue|issues|number|no\.?)$/i
-const C = { open: 'ansi256(2)', merged: 'ansi256(5)', closed: 'ansi256(1)', draft: 'ansi256(8)', warn: 'ansi256(3)', link: 'ansi256(4)', dim: 'ansi256(8)' }
-// Nerd Font octicons: the same marks GitHub draws next to a PR or an issue.
-const ICON = {
-  pr: { OPEN: '', DRAFT: '', MERGED: '', CLOSED: '' },
-  issue: { OPEN: '', COMPLETED: '', NOT_PLANNED: '' },
-} as const
+const C = { open: 'ansi256(2)', merged: 'ansi256(5)', closed: 'ansi256(1)', draft: 'ansi256(8)', warn: 'ansi256(3)', link: 'ansi256(4)', dim: 'ansi256(8)', code: 'ansi256(6)' }
 const STATE_COLOR: Record<string, string> = { OPEN: C.open, DRAFT: C.draft, MERGED: C.merged, CLOSED: C.closed, COMPLETED: C.merged, NOT_PLANNED: C.draft }
 const STATE_WORD: Record<string, string> = { OPEN: 'Open', DRAFT: 'Draft', MERGED: 'Merged', CLOSED: 'Closed', COMPLETED: 'Closed', NOT_PLANNED: 'Not planned' }
 const REVIEW_WORD: Record<string, string> = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes requested', REVIEW_REQUIRED: 'review required' }
+const DOT = '⬤'
+const CARD_WIDTH = 66
 
 const cache = new Map<string, Entry>()
 const expanded = new Set<string>()
@@ -43,60 +47,122 @@ let cwdRepo: string | null | undefined
 let cwdRepoAsked = false
 const queue = new Map<string, Set<number>>()
 let flushQueued = false
+// The signed-in GitHub user: their own reviews read "you", as in the mockup.
+let viewer = ''
 
 const keyFor = (repo: string, number: number) => `${repo.toLowerCase()}#${number}`
 const repoOf = (r: Ref) => r.repo ?? cwdRepo
+const entryOf = (r: Ref) => {
+  const repo = repoOf(r)
+  return repo ? cache.get(keyFor(repo, r.number)) : undefined
+}
 
-function findRefs(text: string): Ref[] {
-  const masked = text.replace(/```[\s\S]*?```|`[^`\n]*`/g, (m) => ' '.repeat(m.length))
-  const refs: Ref[] = []
-  for (const m of masked.matchAll(REF)) {
+// ---------- Finding references ----------
+
+const maskCode = (text: string) => text.replace(/```[\s\S]*?```|`[^`\n]*`/g, (m) => ' '.repeat(m.length))
+
+type Piece = { text: string } | { ref: Ref }
+
+// Splits inline text into plain runs and references; code spans keep their `#123` as written.
+function pieces(text: string): Piece[] {
+  const out: Piece[] = []
+  let at = 0
+  for (const m of maskCode(text).matchAll(REF)) {
+    if (m.index! > at) out.push({ text: text.slice(at, m.index) })
     const isUrl = m[1] !== undefined
-    refs.push({
-      match: m[0], index: m.index!, repo: m[1] ?? m[3] ?? null, number: Number(m[2] ?? m[4]),
-      replace: (item) => `[${icon(item)} #${item.number}${isUrl ? ` ${clean(item.title)}` : ''}](${item.url})`,
-    })
+    const number = Number(m[2] ?? m[4])
+    const repo = m[1] ?? m[3] ?? null
+    out.push({ ref: { repo, number, label: isUrl || repo ? `${repo}#${number}` : `#${number}` } })
+    at = m.index! + m[0].length
   }
-  return [...refs, ...tableRefs(masked)].sort((a, b) => a.index - b.index)
+  if (at < text.length) out.push({ text: text.slice(at) })
+  return out
 }
 
-// Bare numbers in a markdown table column headed `#`, `PR`, `Issue`...
-function tableRefs(text: string): Ref[] {
-  const refs: Ref[] = []
-  let columns: boolean[] = []
-  let offset = 0
-  let previous = ''
-  for (const line of text.split('\n')) {
-    const isRow = /^\s*\|.*\|\s*$/.test(line)
-    if (!isRow) columns = []
-    else if (/^\s*\|[\s:|-]+\|\s*$/.test(line)) columns = cells(previous).map((c) => NUMBER_HEADER.test(c.text.trim()))
-    else if (columns.length) {
-      cells(line).forEach((c, i) => {
-        const m = /^(\s*)(\d{1,7})\s*$/.exec(c.text)
-        if (columns[i] && m) refs.push({ match: m[2]!, index: offset + c.start + m[1]!.length, repo: null, number: Number(m[2]), replace: (item) => `[${icon(item)} ${item.number}](${item.url})` })
-      })
-    }
-    previous = line
-    offset += line.length + 1
-  }
-  return refs
-}
+const refsIn = (text: string) => pieces(text).flatMap((p) => ('ref' in p ? [p.ref] : []))
+
+// ---------- Blocks ----------
+
+type Block =
+  | { kind: 'markdown'; text: string }
+  | { kind: 'paragraph'; lines: string[] }
+  | { kind: 'list'; items: { indent: number; marker: string; text: string }[] }
+  | { kind: 'heading'; level: number; text: string }
+  | { kind: 'table'; header: string[]; rows: string[][]; numbered: boolean[] }
+
+const isTableRow = (line: string) => /^\s*\|.*\|\s*$/.test(line)
+const isRule = (line: string) => /^\s*\|[\s:|-]+\|\s*$/.test(line)
+const LIST = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/
 
 function cells(line: string) {
-  const out: { text: string; start: number }[] = []
+  const out: string[] = []
   let start = line.indexOf('|') + 1
   for (let i = start; i < line.length; i++) {
     if (line[i] === '|' && line[i - 1] !== '\\') {
-      out.push({ text: line.slice(start, i), start })
+      out.push(line.slice(start, i).trim())
       start = i + 1
     }
   }
   return out
 }
 
-const clean = (title: string) => title.replace(/[[\]]/g, '')
-const icon = (item: Item) => (ICON[item.kind] as Record<string, string>)[item.state] ?? '#'
-const color = (item: Item) => STATE_COLOR[item.state] ?? C.dim
+// Paragraphs, lists, headings and tables, the blocks a reference can sit in; anything else stays Claude Code's Markdown.
+function blocks(text: string): Block[] {
+  const lines = text.split('\n')
+  const out: Block[] = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]!
+    if (!line.trim()) { i++; continue }
+    if (/^\s*```/.test(line)) {
+      const start = i++
+      while (i < lines.length && !/^\s*```/.test(lines[i]!)) i++
+      out.push({ kind: 'markdown', text: lines.slice(start, ++i).join('\n') })
+      continue
+    }
+    if (isTableRow(line) && i + 1 < lines.length && isRule(lines[i + 1]!)) {
+      const header = cells(line)
+      const rows: string[][] = []
+      i += 2
+      while (i < lines.length && isTableRow(lines[i]!)) rows.push(cells(lines[i++]!))
+      out.push({ kind: 'table', header, rows, numbered: header.map((h) => NUMBER_HEADER.test(h)) })
+      continue
+    }
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line)
+    if (heading) { out.push({ kind: 'heading', level: heading[1]!.length, text: heading[2]! }); i++; continue }
+    if (LIST.test(line)) {
+      const items: { indent: number; marker: string; text: string }[] = []
+      while (i < lines.length && lines[i]!.trim()) {
+        const m = LIST.exec(lines[i]!)
+        if (m) items.push({ indent: m[1]!.length, marker: m[2]!, text: m[3]! })
+        else if (items.length) items[items.length - 1]!.text += ' ' + lines[i]!.trim()
+        i++
+      }
+      out.push({ kind: 'list', items })
+      continue
+    }
+    const para: string[] = []
+    while (i < lines.length && lines[i]!.trim() && !/^\s*```/.test(lines[i]!) && !LIST.test(lines[i]!) && !/^#{1,6}\s/.test(lines[i]!) && !isTableRow(lines[i]!)) para.push(lines[i++]!)
+    if (para.length) out.push({ kind: 'paragraph', lines: para })
+    else out.push({ kind: 'markdown', text: lines[i++]! })
+  }
+  return out
+}
+
+const blockText = (b: Block): string =>
+  b.kind === 'markdown' ? b.text
+    : b.kind === 'paragraph' ? b.lines.join('\n')
+      : b.kind === 'heading' ? `${'#'.repeat(b.level)} ${b.text}`
+        : b.kind === 'list' ? b.items.map((it) => `${' '.repeat(it.indent)}${it.marker} ${it.text}`).join('\n')
+          : [b.header, b.header.map(() => '---'), ...b.rows].map((r) => `| ${r.join(' | ')} |`).join('\n')
+
+function blockRefs(b: Block): Ref[] {
+  if (b.kind === 'markdown') return []
+  if (b.kind !== 'table') return refsIn(blockText(b))
+  return b.rows.flatMap((row) => row.flatMap((cell, c) => (b.numbered[c] && /^\d{1,7}$/.test(cell) ? [{ repo: null, number: Number(cell), label: cell }] : refsIn(cell))))
+}
+
+// ---------- Loading from GitHub ----------
 
 function askCwdRepo($: EngineInterface) {
   if (cwdRepoAsked) return
@@ -126,9 +192,13 @@ function want($: EngineInterface, ref: Ref) {
 
 const FIELDS = `
   __typename
-  ... on PullRequest { number title url state isDraft author { login } additions deletions changedFiles reviewDecision
-    statusCheckRollup { contexts(first: 1) { totalCount checkRunCountsByState { state count } statusContextCountsByState { state count } } } }
-  ... on Issue { number title url state stateReason author { login } comments { totalCount } }`
+  ... on PullRequest { number title url state isDraft author { login } additions deletions changedFiles reviewDecision createdAt mergedAt closedAt
+    statusCheckRollup { contexts(first: 100) { totalCount checkRunCountsByState { state count } statusContextCountsByState { state count }
+      nodes { __typename ... on CheckRun { name conclusion } ... on StatusContext { context state } } } }
+    latestReviews(first: 20) { nodes { state author { login } } }
+    reviewThreads(first: 100) { nodes { isResolved path line } }
+    files(first: 4) { nodes { path additions deletions } } }
+  ... on Issue { number title url state stateReason author { login } comments { totalCount } createdAt closedAt }`
 
 async function flush($: EngineInterface) {
   flushQueued = false
@@ -145,11 +215,12 @@ async function flush($: EngineInterface) {
 
 async function fetchChunk($: EngineInterface, repo: string, numbers: number[]) {
   const [owner, name] = repo.split('/')
-  const query = `query { repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${numbers.map((n) => `n${n}: issueOrPullRequest(number: ${n}) { ${FIELDS} }`).join('\n')} } }`
+  const query = `query { viewer { login } repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${numbers.map((n) => `n${n}: issueOrPullRequest(number: ${n}) { ${FIELDS} }`).join('\n')} } }`
   const fail = (error: string) => numbers.forEach((n) => cache.set(keyFor(repo, n), { at: Date.now(), loading: false, error }))
   try {
     const out = await $.process.run(['gh', 'api', 'graphql', '-f', `query=${query}`], { timeoutMs: 20_000 })
-    const body = JSON.parse(out.stdout || '{}') as { data?: { repository?: Record<string, Raw | null> | null }; errors?: { message: string }[] }
+    const body = JSON.parse(out.stdout || '{}') as { data?: { viewer?: { login: string }; repository?: Record<string, Raw | null> | null }; errors?: { message: string }[] }
+    viewer = body.data?.viewer?.login ?? viewer
     const found = body.data?.repository
     if (!found) return fail(body.errors?.[0]?.message ?? (out.stderr.trim().split('\n')[0] || `gh exited ${out.exitCode}`))
     for (const n of numbers) {
@@ -166,117 +237,243 @@ type Raw = {
   __typename: 'PullRequest' | 'Issue'
   number: number; title: string; url: string; state: string; isDraft?: boolean; stateReason?: string | null
   author?: { login: string } | null; additions?: number; deletions?: number; changedFiles?: number; reviewDecision?: string | null
-  statusCheckRollup?: { contexts: { totalCount: number; checkRunCountsByState?: Count[]; statusContextCountsByState?: Count[] } } | null
+  createdAt?: string; mergedAt?: string | null; closedAt?: string | null
+  statusCheckRollup?: {
+    contexts: {
+      totalCount: number; checkRunCountsByState?: Count[]; statusContextCountsByState?: Count[]
+      nodes?: { __typename: string; name?: string; conclusion?: string | null; context?: string; state?: string }[]
+    }
+  } | null
+  latestReviews?: { nodes: { state: string; author?: { login: string } | null }[] }
+  reviewThreads?: { nodes: { isResolved: boolean; path: string; line: number | null }[] }
+  files?: { nodes: { path: string; additions: number; deletions: number }[] }
   comments?: { totalCount: number }
 }
 
 const OK = ['SUCCESS', 'NEUTRAL', 'SKIPPED']
 const FAILED = ['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'STALE']
 
+function ago(iso: string | null | undefined, now = Date.now()) {
+  if (!iso) return ''
+  const minutes = Math.max(0, Math.round((now - Date.parse(iso)) / 60_000))
+  const [n, unit] = minutes < 60 ? [minutes, 'minute'] : minutes < 1440 ? [Math.round(minutes / 60), 'hour'] : [Math.round(minutes / 1440), 'day']
+  return n === 0 ? 'just now' : `${n} ${unit}${n === 1 ? '' : 's'} ago`
+}
+
 function toItem(repo: string, raw: Raw): Item {
   const author = raw.author?.login ?? 'ghost'
   if (raw.__typename === 'Issue') {
     const state = raw.state === 'OPEN' ? 'OPEN' : raw.stateReason === 'NOT_PLANNED' ? 'NOT_PLANNED' : 'COMPLETED'
-    return { kind: 'issue', number: raw.number, repo, title: raw.title, url: raw.url, state, author, comments: raw.comments?.totalCount ?? 0 }
+    const when = state === 'OPEN' ? `opened ${ago(raw.createdAt)}` : `closed ${ago(raw.closedAt)}`
+    return { kind: 'issue', number: raw.number, repo, title: raw.title, url: raw.url, state, author, when, comments: raw.comments?.totalCount ?? 0 }
   }
-  const counts = [...(raw.statusCheckRollup?.contexts.checkRunCountsByState ?? []), ...(raw.statusCheckRollup?.contexts.statusContextCountsByState ?? [])]
+  const contexts = raw.statusCheckRollup?.contexts
+  const counts = [...(contexts?.checkRunCountsByState ?? []), ...(contexts?.statusContextCountsByState ?? [])]
   const sum = (states: string[]) => counts.filter((c) => states.includes(c.state)).reduce((a, c) => a + c.count, 0)
-  const total = raw.statusCheckRollup?.contexts.totalCount ?? 0
+  const total = contexts?.totalCount ?? 0
   const ok = sum(OK)
   const failed = sum(FAILED)
+  const failing = (contexts?.nodes ?? []).filter((c) => FAILED.includes(c.conclusion ?? c.state ?? '')).map((c) => c.name ?? c.context ?? '?')
+  const reviews = raw.latestReviews?.nodes ?? []
+  const by = (s: string) => reviews.filter((r) => r.state === s).map((r) => r.author?.login ?? 'ghost')
+  const state = raw.state === 'OPEN' && raw.isDraft ? 'DRAFT' : raw.state
+  const when = state === 'MERGED' ? `merged ${ago(raw.mergedAt)}` : state === 'CLOSED' ? `closed ${ago(raw.closedAt)}` : `opened ${ago(raw.createdAt)}`
   return {
-    kind: 'pr', number: raw.number, repo, title: raw.title, url: raw.url,
-    state: raw.state === 'OPEN' && raw.isDraft ? 'DRAFT' : raw.state, author,
+    kind: 'pr', number: raw.number, repo, title: raw.title, url: raw.url, state, author, when,
     additions: raw.additions, deletions: raw.deletions, changedFiles: raw.changedFiles,
-    review: raw.reviewDecision ?? undefined, checks: { ok, failed, pending: Math.max(0, total - ok - failed), total },
+    review: raw.reviewDecision ?? undefined, checks: { ok, failed, pending: Math.max(0, total - ok - failed), total }, failing,
+    approvedBy: by('APPROVED'), changesBy: by('CHANGES_REQUESTED'),
+    threads: (raw.reviewThreads?.nodes ?? []).filter((t) => !t.isResolved).map((t) => ({ path: t.path, line: t.line })),
+    files: raw.files?.nodes ?? [],
   }
 }
 
-const checkGlyph = (c?: Checks) => (!c || !c.total ? '' : c.failed ? '✖' : c.pending ? '●' : '✔')
+const color = (item: Item) => STATE_COLOR[item.state] ?? C.dim
+const who = (login: string) => (login === viewer ? 'you' : `@${login}`)
+const short = (url: string) => url.replace(/^https:\/\//, '')
 
-function rewrite(text: string, refs: Ref[]) {
-  let out = ''
-  let at = 0
-  for (const r of refs) {
-    if (r.index < at) continue
-    const repo = repoOf(r)
-    const item = repo ? cache.get(keyFor(repo, r.number))?.item : undefined
-    out += text.slice(at, r.index) + (item ? r.replace(item) : r.match)
-    at = r.index + r.match.length
-  }
-  return out + text.slice(at)
-}
+// ---------- Drawing ----------
 
 export const register: Register = (on) => {
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    const refs = findRefs(e.props.text)
+    const parsed = blocks(e.props.text)
+    const refs = parsed.flatMap(blockRefs)
     if (!refs.length) return next(e)
     for (const r of refs) want($, r)
 
     const { Box, Text, Markdown } = $.ui.resolve(e)
     const id = `pr-${e.requestId}`
-    const unique = [...new Map(refs.map((r) => [`${r.repo ?? ''}#${r.number}`, r])).values()]
-    const entries = unique.map((ref) => {
-      const repo = repoOf(ref)
-      return { ref, entry: repo ? cache.get(keyFor(repo, ref.number)) : undefined }
-    })
-    const items = entries.flatMap((p) => (p.entry?.item ? [p.entry.item] : []))
+    const columns = Math.max(40, (e.viewport?.columns ?? 100) - 2)
+    let serial = 0
 
-    const line = (children: (string | RenderElement)[], c?: string) => Text({ color: c, children })
-    const head = (item: Item) => line([`${icon(item)} ${STATE_WORD[item.state] ?? item.state}  ${item.repo} #${item.number}`], color(item))
-    const facts = (item: Item) =>
-      item.kind === 'pr'
-        ? [
-            line([`@${item.author} · +${item.additions} −${item.deletions} · ${item.changedFiles} files`], C.dim),
-            line([`checks ${item.checks!.ok}/${item.checks!.total}${item.checks!.failed ? ` · ${item.checks!.failed} failing` : ''}${item.checks!.pending ? ` · ${item.checks!.pending} running` : ''}`],
-              item.checks!.failed ? C.closed : item.checks!.pending ? C.warn : C.open),
-            line([`review: ${REVIEW_WORD[item.review ?? ''] ?? 'none'}`]),
-          ]
-        : [line([`issue · @${item.author} · ${item.comments} comments`], C.dim)]
+    type Part = string | RenderElement
+    const line = (children: Part[], c?: string) => Text({ color: c, children })
+    const span = (text: string, c?: string, extra: { bold?: boolean; italic?: boolean; underline?: boolean; backgroundColor?: string } = {}) => Text({ color: c, ...extra, children: [text] })
+    const names = (logins: string[]) => logins.map(who).join(', ')
+    const badge = (item: Item) => span(` ${STATE_WORD[item.state] ?? item.state} `, 'ansi256(0)', { backgroundColor: color(item), bold: true })
 
-    const card = (item: Item) =>
-      Box({
-        position: 'absolute', bottom: 1, left: 0, display: 'none', hover: { display: 'flex' },
-        flexDirection: 'column', width: 64, borderStyle: 'round', borderColor: color(item), paddingX: 1,
-        children: [head(item), Text({ bold: true, children: [item.title] }), ...facts(item), line([item.url], C.link), line(['click the link to expand · ctrl+click opens'], C.dim)],
-      })
-
-    const errorCard = (error: string) =>
-      Box({ position: 'absolute', bottom: 1, left: 0, display: 'none', hover: { display: 'flex' }, width: 64, borderStyle: 'round', borderColor: C.closed, paddingX: 1, children: [line([error], C.closed)] })
-
-    const chip = ({ ref, entry }: (typeof entries)[number]) => {
-      const item = entry?.item
-      // As the mockup draws it: a dot in the state's color, then the number as a link.
-      const dot = Text({ color: item ? color(item) : entry?.error ? C.closed : C.dim, children: ['⬤ '] })
-      const number = Text({ color: C.link, underline: true, hover: { bold: true }, children: [`#${ref.number}`] })
-      const pop = item ? [card(item)] : entry?.error ? [errorCard(entry.error)] : []
-      return Box({ key: `${id}-${ref.repo ?? ''}-${ref.number}`, paddingX: 1, hover: { backgroundColor: 'ansi256(8)' }, children: [dot, number, ...pop] })
+    // The card's rows under the title, as the mockup: who and when, size, checks, reviews, threads.
+    const facts = (item: Item): RenderElement[] => {
+      if (item.kind === 'issue') return [line([`@${item.author} · ${item.when} · ${item.comments} comments`], C.dim)]
+      const c = item.checks!
+      const rows: RenderElement[] = [
+        line([`@${item.author} · ${item.when} · `, span(`+${item.additions}`, C.open), ' ', span(`−${item.deletions}`, C.closed), ` · ${item.changedFiles} files`], C.dim),
+      ]
+      if (c.total) {
+        rows.push(line([
+          span('✔', C.open), ` ${c.ok} of ${c.total} checks`,
+          ...(item.failing?.length ? [' · ', span(`✖ ${item.failing[0]}${item.failing.length > 1 ? ` +${item.failing.length - 1}` : ''}`, C.closed)] : []),
+          ...(c.pending ? [' · ', span(`● ${c.pending} running`, C.warn)] : []),
+        ]))
+      }
+      const reviews: Part[] = []
+      if (item.approvedBy?.length) reviews.push(span('✔', C.open), ` approved by ${names(item.approvedBy)}`)
+      if (item.changesBy?.length) reviews.push(...(reviews.length ? [' · '] : []), span(`● changes requested by ${names(item.changesBy)}`, C.warn))
+      rows.push(reviews.length ? line(reviews) : line([REVIEW_WORD[item.review ?? ''] ?? 'no reviews yet'], C.dim))
+      if (item.threads?.length) rows.push(line([`${item.threads.length} open review thread${item.threads.length === 1 ? '' : 's'}`]))
+      return rows
     }
 
-    const panel = (item: Item) =>
+    // Opens upward: rows drawn after the reference would paint over a card below it.
+    const popup = (children: RenderElement[], border: string) =>
       Box({
-        flexDirection: 'column', borderStyle: 'round', borderColor: color(item), paddingX: 1, marginTop: 1,
-        children: [head(item), Text({ bold: true, children: [item.title] }), ...facts(item), line([item.url], C.link)],
+        position: 'absolute', bottom: 1, left: 0, display: 'none', hover: { display: 'flex' },
+        flexDirection: 'column', width: CARD_WIDTH, borderStyle: 'round', borderColor: border, backgroundColor: 'ansi256(0)', paddingX: 1, children,
       })
 
-    const open = items.filter((item) => expanded.has(`${id}:${item.url}`))
-    return Box({
-      flexDirection: 'column',
-      children: [
-        Markdown({
-          key: id,
-          text: rewrite(e.props.text, refs),
-          pressableLinks: items.map((item) => item.url),
-          onLinkPress: (link) => {
-            const k = `${id}:${link.href}`
-            if (expanded.has(k)) expanded.delete(k)
-            else expanded.add(k)
-            $.ui.invalidate('ui.render')
-          },
-        }),
-        Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, children: entries.map(chip) }),
-        ...open.map(panel),
-      ],
-    })
+    const card = (item: Item) =>
+      popup([
+        line([badge(item), span(`  ${item.repo} #${item.number}`, C.dim)]),
+        Text({ bold: true, children: [item.title] }),
+        ...facts(item),
+        span(short(item.url), C.link, { underline: true }),
+        span('─'.repeat(CARD_WIDTH - 4), C.dim),
+        span('click the number expands · ctrl+click opens it', C.dim),
+      ], C.dim)
+
+    // A reference where the text has it: the state dot, the number as a link, the card on hover.
+    const reference = (ref: Ref) => {
+      const entry = entryOf(ref)
+      const item = entry?.item
+      const dot = span(`${DOT} `, item ? color(item) : entry?.error ? C.closed : C.dim)
+      const label = item
+        ? Markdown({ key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})`, pressableLinks: [item.url], onLinkPress: (link) => toggle(link.href) })
+        : span(ref.label, C.link, { underline: true })
+      const pop = item ? [card(item)] : entry?.error ? [popup([line([entry.error], C.closed)], C.closed)] : []
+      return Box({ key: `${id}-ref-${serial++}`, flexShrink: 0, children: [dot, label, ...pop] })
+    }
+
+    const toggle = (href: string) => {
+      const k = `${id}:${href}`
+      if (expanded.has(k)) expanded.delete(k)
+      else expanded.add(k)
+      $.ui.invalidate('ui.render')
+    }
+
+    // Inline markdown as words that wrap, so a reference can sit between them.
+    const styled = (text: string, base: { bold?: boolean } = {}): RenderElement[] => {
+      const out: RenderElement[] = []
+      const TOKEN = /`([^`]+)`|\*\*([^*]+)\*\*|(?<![\w*])\*([^*\s][^*]*)\*(?![\w*])|\[([^\]]+)\]\((https?:[^)\s]+)\)|(\s+)|([^\s`*[]+|[`*[])/g
+      for (const m of text.matchAll(TOKEN)) {
+        if (m[1] !== undefined) out.push(span(m[1], C.code))
+        else if (m[2] !== undefined) out.push(...m[2].split(/(?<=\s)/).map((w) => span(w, undefined, { ...base, bold: true })))
+        else if (m[3] !== undefined) out.push(...m[3].split(/(?<=\s)/).map((w) => span(w, undefined, { ...base, italic: true })))
+        else if (m[4] !== undefined) out.push(Markdown({ text: `[${m[4]}](${m[5]})` }))
+        else if (m[6] !== undefined) out.push(span(' ', undefined, base))
+        else out.push(span(m[7]!, undefined, base))
+      }
+      return out
+    }
+
+    const flow = (text: string, base: { bold?: boolean } = {}) =>
+      pieces(text).flatMap((p) => ('ref' in p ? [reference(p.ref)] : styled(p.text, base)))
+
+    const row = (children: RenderElement[], extra: Record<string, unknown> = {}) => Box({ flexDirection: 'row', flexWrap: 'wrap', ...extra, children })
+
+    const width = (cell: string, numbered: boolean) =>
+      numbered && /^\d{1,7}$/.test(cell)
+        ? cell.length + 2
+        : pieces(cell).reduce((n, p) => n + ('ref' in p ? p.ref.label.length + 2 : p.text.replace(/\*\*|`/g, '').length), 0)
+
+    const table = (b: Extract<Block, { kind: 'table' }>) => {
+      const count = b.header.length
+      const natural = b.header.map((h, c) => Math.max(h.length, ...b.rows.map((r) => width(r[c] ?? '', b.numbered[c]!))))
+      const room = columns - 2 * (count - 1)
+      const widths = [...natural]
+      // Shrink the widest column until the table fits; its cells wrap.
+      while (widths.reduce((a, w) => a + w, 0) > room) {
+        const widest = widths.indexOf(Math.max(...widths))
+        if (widths[widest]! <= 8) break
+        widths[widest]!--
+      }
+      const cell = (text: string, c: number, header: boolean) =>
+        Box({
+          width: widths[c], flexShrink: 0, flexDirection: 'row', flexWrap: 'wrap',
+          children: header ? [span(text, undefined, { bold: true })]
+            : b.numbered[c] && /^\d{1,7}$/.test(text) ? [reference({ repo: null, number: Number(text), label: text })]
+              : flow(text),
+        })
+      const total = widths.reduce((a, w) => a + w, 0) + 2 * (count - 1)
+      return Box({
+        flexDirection: 'column',
+        children: [
+          Box({ flexDirection: 'row', columnGap: 2, children: b.header.map((h, c) => cell(h, c, true)) }),
+          span('─'.repeat(total), C.dim),
+          ...b.rows.map((r) => Box({ flexDirection: 'row', columnGap: 2, children: b.header.map((_, c) => cell(r[c] ?? '', c, false)) })),
+        ],
+      })
+    }
+
+    const draw = (b: Block): RenderElement => {
+      if (!blockRefs(b).length) return Markdown({ text: blockText(b) })
+      switch (b.kind) {
+        case 'table': return table(b)
+        case 'heading': return row(flow(b.text, { bold: true }))
+        case 'list': return Box({ flexDirection: 'column', children: b.items.map((it) => row([span(/\d/.test(it.marker) ? `${it.marker} ` : '• '), ...flow(it.text)], { paddingLeft: it.indent })) })
+        case 'paragraph': return Box({ flexDirection: 'column', children: b.lines.map((l) => row(flow(l))) })
+        default: return Markdown({ text: blockText(b) })
+      }
+    }
+
+    // The mockup's expanded panel: checks, reviews and threads, files.
+    const column = (title: string, rows: RenderElement[]) => Box({ flexDirection: 'column', flexGrow: 1, width: 0, children: [span(title, C.dim), ...rows] })
+    const panel = (item: Item) => {
+      const c = item.checks
+      const parts =
+        item.kind === 'pr' && c
+          ? [
+              column(`CHECKS ${c.ok}/${c.total}`, [
+                ...(item.failing ?? []).slice(0, 4).map((n) => line([span('✖', C.closed), ` ${n}`])),
+                ...(c.pending ? [line([span('●', C.warn), ` ${c.pending} running`])] : []),
+                line([span('✔', C.open), ` ${c.ok} passed`]),
+              ]),
+              column('REVIEWS', [
+                ...(item.approvedBy ?? []).map((l) => line([span('✔', C.open), ` ${who(l)} approved`])),
+                ...(item.changesBy ?? []).map((l) => line([span('●', C.warn), ` ${who(l)}: changes requested`])),
+                ...(!item.approvedBy?.length && !item.changesBy?.length ? [span('none yet', C.dim)] : []),
+                ...(item.threads?.length ? [span(`OPEN THREADS ${item.threads.length}`, C.dim), ...item.threads.slice(0, 3).map((t) => line([`${t.path.split('/').pop()}${t.line ? `:${t.line}` : ''}`]))] : []),
+              ]),
+              column(`FILES ${item.changedFiles}`, [
+                ...(item.files ?? []).map((f) => line([`${f.path.split('/').pop()} `, span(`+${f.additions}`, C.open), ' ', span(`−${f.deletions}`, C.closed)])),
+                ...((item.changedFiles ?? 0) > (item.files?.length ?? 0) ? [span(`+ ${(item.changedFiles ?? 0) - (item.files?.length ?? 0)} more files`, C.dim)] : []),
+              ]),
+            ]
+          : [column('ISSUE', [line([`@${item.author} · ${item.when} · ${item.comments} comments`], C.dim)])]
+      return Box({
+        flexDirection: 'column', borderStyle: 'round', borderColor: C.dim, paddingX: 1, rowGap: 1,
+        children: [
+          line([badge(item), '  ', span(`#${item.number} ${item.title}`, undefined, { bold: true })]),
+          Box({ flexDirection: 'row', columnGap: 3, children: parts }),
+          Markdown({ text: `[Open ${short(item.url)}](${item.url})` }),
+        ],
+      })
+    }
+
+    const drawn = parsed.map(draw)
+    const open = [...new Map(refs.flatMap((r) => {
+      const item = entryOf(r)?.item
+      return item && expanded.has(`${id}:${item.url}`) ? [[item.url, item] as const] : []
+    })).values()]
+    return Box({ flexDirection: 'column', rowGap: 1, children: [...drawn, ...open.map(panel)] })
   })
 }
