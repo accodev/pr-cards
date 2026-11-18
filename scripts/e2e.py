@@ -109,6 +109,33 @@ try:
     dump("3-click")
     clicked = "CHECKS" in text() and "FILES" in text()
     print("panel:", clicked)
+
+    # The real list: 15 PRs with long titles, the reply that once crashed the hooks worker.
+    proc.write("/clear\r")
+    time.sleep(3)
+    proc.write("List the last 15 PRs of this repo as a markdown table with columns #, State, Author, Title. Use gh.")
+    time.sleep(1)
+    proc.write("\r")
+    wait(lambda t: "Title" in t and t.count("⬤") >= 15, 180, "list")
+    time.sleep(10)
+    dump("4-list")
+    with lock:
+        dots = [screen.buffer[r][c].fg for r in range(ROWS) for c in range(COLS) if screen.buffer[r][c].data == "⬤"]
+    print("dot colors:", sorted(set(dots)))
+    # A hollow dot is a reference still loading, a cross one whose lookup failed.
+    pending = text().count("○")
+    failed = text().count("✖ ")
+    crashed = "crashed" in text()
+    print("list dots:", len(dots), "loading:", pending, "failed:", failed, "crashed:", crashed)
+    clicked = clicked and not crashed and len(dots) >= 15 and not pending and not failed
+    row = find("⬤ 1320")
+    if row:
+        proc.write(f"\x1b[<35;{row[0] + 3};{row[1]}M")
+        time.sleep(2)
+        dump("5-list-hover")
+        card = "Draft" in text() and "#1320" in text()
+        print("list hover card:", card)
+        clicked = clicked and card
 finally:
     proc.write("\x03")
     time.sleep(0.5)
