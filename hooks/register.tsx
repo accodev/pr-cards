@@ -320,7 +320,7 @@ export const register: Register = (on) => {
     const BG = 'ansi256(236)'
     const INNER = CARD_WIDTH - 4 // two border cells and one blank cell on each side
     const seg = (text: string, c?: string, extra: Omit<Seg, 'text' | 'color'> = {}): Seg => ({ text, color: c, ...extra })
-    const fill = (segs: Seg[], border: string): RenderElement[] => {
+    const fill = (segs: Seg[]): RenderElement[] => {
       const rows: Seg[][] = [[]]
       let used = 0
       for (const s of segs) {
@@ -355,17 +355,16 @@ export const register: Register = (on) => {
         return Text({
           backgroundColor: BG,
           children: [
-            Text({ color: border, backgroundColor: BG, children: ['│ '] }),
+            '  ',
             ...row.map((s) => Text({ color: s.color, bold: s.bold, underline: s.underline, backgroundColor: s.backgroundColor ?? BG, children: [s.text] })),
-            ' '.repeat(Math.max(0, INNER - width)),
-            Text({ color: border, backgroundColor: BG, children: [' │'] }),
+            ' '.repeat(Math.max(0, INNER - width) + 2),
           ],
         })
       })
     }
-    // The frame is text too: a Box border's cells take no background.
-    const edge = (left: string, right: string, border: string) =>
-      Text({ color: border, backgroundColor: BG, children: [`${left}${'─'.repeat(CARD_WIDTH - 2)}${right}`] })
+    // The fill is the card's edge. A box-drawing line runs through the middle of its cell, so a border
+    // cell either leaves a dark half inside the line or a gray half outside it.
+    const edge = () => Text({ backgroundColor: BG, children: [' '.repeat(CARD_WIDTH)] })
 
     // The card's rows under the title, as the mockup: who and when, size, checks, reviews, threads.
     const facts = (item: Item): Seg[][] => {
@@ -390,11 +389,11 @@ export const register: Register = (on) => {
     }
 
     // Opens upward: rows drawn after the reference would paint over a card below it.
-    const popup = (rows: Seg[][], border: string) =>
+    const popup = (rows: Seg[][]) =>
       Box({
         position: 'absolute', bottom: 1, left: 0, display: 'none', hover: { display: 'flex' },
         flexDirection: 'column', width: CARD_WIDTH,
-        children: [edge('╭', '╮', border), ...rows.flatMap((r) => fill(r, border)), edge('╰', '╯', border)],
+        children: [edge(), ...rows.flatMap((r) => fill(r)), edge()],
       })
 
     const card = (item: Item) =>
@@ -405,7 +404,7 @@ export const register: Register = (on) => {
         [seg(short(item.url), C.link, { underline: true })],
         [seg('─'.repeat(INNER), C.dim)],
         [seg('click the number expands · ctrl+click opens it', C.dim)],
-      ], C.dim)
+      ])
 
     // A reference where the text has it: the state dot, the number as a link, the card on hover.
     const reference = (ref: Ref) => {
@@ -416,7 +415,7 @@ export const register: Register = (on) => {
       const label = item
         ? Markdown({ key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})`, pressableLinks: [item.url], onLinkPress: (link) => toggle(link.href) })
         : span(ref.label, C.link, { underline: true })
-      const pop = item ? [card(item)] : entry?.error ? [popup([[seg(entry.error, C.closed)]], C.closed)] : []
+      const pop = item ? [card(item)] : entry?.error ? [popup([[seg(entry.error, C.closed)]])] : []
       return Box({ key: `${id}-ref-${serial++}`, flexShrink: 0, children: [dot, label, ...pop] })
     }
 

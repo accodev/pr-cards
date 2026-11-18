@@ -94,15 +94,17 @@ try:
     hovered = "#1306" in text() and "checks" in text()
     print("hover card:", hovered)
     # Every cell inside the card's border has a background, so nothing under it shows through.
+    # The card is the rectangle of cells filled with its gray (ansi256 236); every cell in it is filled,
+    # and no box-drawing frame sits on its edge.
     with lock:
-        lines = screen.display
-        top = next(i for i, l in enumerate(lines) if "╭" in l)
-        bottom = next(i for i, l in enumerate(lines) if "╰" in l and i > top)
-        left, right = lines[top].index("╭"), lines[top].index("╮")
-        # The whole rectangle, border rows and columns included.
-        holes = [(r, c) for r in range(top, bottom + 1) for c in range(left, right + 1) if screen.buffer[r][c].bg == "default"]
-    print("card cells without background:", len(holes), holes[:5])
-    hovered = hovered and not holes
+        gray = [(r, c) for r in range(ROWS) for c in range(COLS) if screen.buffer[r][c].bg == "303030"]
+        top, bottom = min(r for r, _ in gray), max(r for r, _ in gray)
+        left, right = min(c for _, c in gray), max(c for _, c in gray)
+        holes = [(r, c) for r in range(top, bottom + 1) for c in range(left, right + 1) if screen.buffer[r][c].bg == "default"]  # the state badge has its own color
+        frame = [(r, c) for r in (top, bottom) for c in range(left, right + 1) if screen.buffer[r][c].data in "╭╮╰╯─│"] + \
+                [(r, c) for r in range(top, bottom + 1) for c in (left, right) if screen.buffer[r][c].data in "╭╮╰╯─│"]
+    print("card", (top, left, bottom, right), "unfilled cells:", len(holes), holes[:5], "frame cells:", len(frame))
+    hovered = hovered and not holes and not frame and right - left + 1 == 66
     proc.write(f"\x1b[<35;{x};{min(ROWS, y + 3)}M")  # the pointer leaves
     time.sleep(1)
     proc.write(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m")  # a plain click
