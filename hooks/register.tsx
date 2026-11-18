@@ -236,13 +236,13 @@ export const register: Register = (on) => {
 
     const card = (item: Item) =>
       Box({
-        position: 'absolute', top: 1, left: 0, display: 'none', hover: { display: 'flex' },
+        position: 'absolute', bottom: 1, left: 0, display: 'none', hover: { display: 'flex' },
         flexDirection: 'column', width: 64, borderStyle: 'round', borderColor: color(item), paddingX: 1,
         children: [head(item), Text({ bold: true, children: [item.title] }), ...facts(item), line([item.url], C.link), line(['click the link to expand · ctrl+click opens'], C.dim)],
       })
 
     const errorCard = (error: string) =>
-      Box({ position: 'absolute', top: 1, left: 0, display: 'none', hover: { display: 'flex' }, width: 64, borderStyle: 'round', borderColor: C.closed, paddingX: 1, children: [line([error], C.closed)] })
+      Box({ position: 'absolute', bottom: 1, left: 0, display: 'none', hover: { display: 'flex' }, width: 64, borderStyle: 'round', borderColor: C.closed, paddingX: 1, children: [line([error], C.closed)] })
 
     const chip = ({ ref, entry }: (typeof entries)[number]) => {
       const item = entry?.item
