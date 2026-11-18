@@ -4,7 +4,7 @@ Run from the repo root, with the folder of a GitHub repo that has PR 1306 and is
     uv run --no-project --with pywinpty --with pyte python -I scripts/e2e.py C:/code/market-it
 Each screen is saved as text in scripts/e2e-out/. Exit code 0 means the card and the panel both appeared.
 """
-import os, sys, threading, time
+import os, re, sys, threading, time
 import pyte
 from winpty import PtyProcess
 
@@ -21,6 +21,7 @@ os.makedirs(OUT, exist_ok=True)
 screen = pyte.Screen(COLS, ROWS)
 stream = pyte.ByteStream(screen)
 lock = threading.Lock()
+raw = bytearray()  # what the terminal received, for the OSC 8 hyperlinks pyte does not keep
 
 # Fullscreen rendering turns on mouse reporting; WT_SESSION makes links draw as they do in Windows Terminal.
 env = dict(os.environ, CLAUDE_CODE_NO_FLICKER="1", WT_SESSION="e2e", TERM_PROGRAM="WindowsTerminal")
@@ -33,8 +34,10 @@ def reader():
             data = proc.read(65536)
         except EOFError:
             break
+        b = data.encode("utf-8", "surrogatepass") if isinstance(data, str) else data
         with lock:
-            stream.feed(data.encode("utf-8", "surrogatepass") if isinstance(data, str) else data)
+            raw.extend(b)
+            stream.feed(b)
 
 
 threading.Thread(target=reader, daemon=True).start()
@@ -105,6 +108,14 @@ try:
                 [(r, c) for r in range(top, bottom + 1) for c in (left, right) if screen.buffer[r][c].data in "╭╮╰╯─│"]
     print("card", (top, left, bottom, right), "unfilled cells:", len(holes), holes[:5], "frame cells:", len(frame))
     hovered = hovered and not holes and not frame and right - left + 1 == 66
+    # The author is a hyperlink to the profile, the URL row one to the PR.
+    with lock:
+        # OSC 8 carries parameters (an id) before the second `;`.
+        targets = set(m.decode("utf-8", "replace") for m in re.findall(rb"\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]+)", bytes(raw)))
+        author_link = "https://github.com/danielscainifiskaltrust" in targets
+        pr_link = "https://github.com/fiskaltrust/market-it/pull/1306" in targets
+    print("author link:", author_link, "pr link:", pr_link, "footer:", "ctrl+click opens a link" in text())
+    hovered = hovered and author_link and pr_link and "ctrl+click opens a link" in text()
     proc.write(f"\x1b[<35;{x};{min(ROWS, y + 3)}M")  # the pointer leaves
     time.sleep(1)
     proc.write(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m")  # a plain click

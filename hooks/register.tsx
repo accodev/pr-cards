@@ -301,7 +301,7 @@ export const register: Register = (on) => {
     if (!refs.length) return next(e)
     for (const r of refs) want($, r)
 
-    const { Box, Text, Markdown } = $.ui.resolve(e)
+    const { Box, Text, Markdown, Link } = $.ui.resolve(e)
     const id = `pr-${e.requestId}`
     const columns = Math.max(40, (e.viewport?.columns ?? 100) - 2)
     let serial = 0
@@ -309,12 +309,16 @@ export const register: Register = (on) => {
     type Part = string | RenderElement
     const line = (children: Part[], c?: string) => Text({ color: c, children })
     const span = (text: string, c?: string, extra: { bold?: boolean; italic?: boolean; underline?: boolean; backgroundColor?: string } = {}) => Text({ color: c, ...extra, children: [text] })
-    const names = (logins: string[]) => logins.map(who).join(', ')
     const badge = (item: Item) => span(` ${STATE_WORD[item.state] ?? item.state} `, 'ansi256(0)', { backgroundColor: color(item), bold: true })
 
     // A card is drawn as text rows padded to its full width: a Box background paints only the cells
     // that hold text, so the transcript under a short row would show through.
-    type Seg = { text: string; color?: string; bold?: boolean; underline?: boolean; backgroundColor?: string }
+    // `href` draws the run as a Link: an OSC 8 hyperlink that ctrl+click opens, inside the filled row.
+    type Seg = { text: string; color?: string; bold?: boolean; underline?: boolean; backgroundColor?: string; href?: string }
+    const profile = (login: string) => `https://github.com/${login}`
+    // `@login` linked to the profile; the signed-in user reads "you", unlinked.
+    const person = (login: string, c?: string): Seg => (login === viewer ? { text: 'you', color: c } : { text: `@${login}`, color: c ?? C.link, underline: true, href: profile(login) })
+    const people = (logins: string[], c?: string): Seg[] => logins.flatMap((l, i) => [...(i ? [{ text: ', ', color: c }] : []), person(l, c)])
     // A fixed dark gray (#303030), as the mockup's card: palette black is the terminal background in
     // most dark schemes, so a card filled with it shows no edge. Mods get no theme background key.
     const BG = 'ansi256(236)'
@@ -343,7 +347,7 @@ export const register: Register = (on) => {
           }
         }
       }
-      const same = (a: Seg, b: Seg) => a.color === b.color && a.bold === b.bold && a.underline === b.underline && a.backgroundColor === b.backgroundColor
+      const same = (a: Seg, b: Seg) => a.color === b.color && a.bold === b.bold && a.underline === b.underline && a.backgroundColor === b.backgroundColor && a.href === b.href
       const merged = rows.map((row) => row.reduce<Seg[]>((out, s) => {
         const last = out[out.length - 1]
         if (last && same(last, s)) last.text += s.text
@@ -356,7 +360,10 @@ export const register: Register = (on) => {
           backgroundColor: BG,
           children: [
             '  ',
-            ...row.map((s) => Text({ color: s.color, bold: s.bold, underline: s.underline, backgroundColor: s.backgroundColor ?? BG, children: [s.text] })),
+            ...row.map((s) => {
+              const run = Text({ color: s.color, bold: s.bold, underline: s.underline, backgroundColor: s.backgroundColor ?? BG, children: [s.text] })
+              return s.href ? Link({ href: s.href, children: [run] }) : run
+            }),
             ' '.repeat(Math.max(0, INNER - width) + 2),
           ],
         })
@@ -368,10 +375,10 @@ export const register: Register = (on) => {
 
     // The card's rows under the title, as the mockup: who and when, size, checks, reviews, threads.
     const facts = (item: Item): Seg[][] => {
-      if (item.kind === 'issue') return [[seg(`@${item.author} · ${item.when} · ${item.comments} comments`, C.dim)]]
+      if (item.kind === 'issue') return [[person(item.author), seg(` · ${item.when} · ${item.comments} comments`, C.dim)]]
       const c = item.checks!
       const rows: Seg[][] = [
-        [seg(`@${item.author} · ${item.when} · `, C.dim), seg(`+${item.additions}`, C.open), seg(' '), seg(`−${item.deletions}`, C.closed), seg(` · ${item.changedFiles} files`, C.dim)],
+        [person(item.author), seg(` · ${item.when} · `, C.dim), seg(`+${item.additions}`, C.open), seg(' '), seg(`−${item.deletions}`, C.closed), seg(` · ${item.changedFiles} files`, C.dim)],
       ]
       if (c.total) {
         rows.push([
@@ -381,8 +388,8 @@ export const register: Register = (on) => {
         ])
       }
       const reviews: Seg[] = []
-      if (item.approvedBy?.length) reviews.push(seg('✔', C.open), seg(` approved by ${names(item.approvedBy)}`))
-      if (item.changesBy?.length) reviews.push(...(reviews.length ? [seg(' · ')] : []), seg(`● changes requested by ${names(item.changesBy)}`, C.warn))
+      if (item.approvedBy?.length) reviews.push(seg('✔', C.open), seg(' approved by '), ...people(item.approvedBy))
+      if (item.changesBy?.length) reviews.push(...(reviews.length ? [seg(' · ')] : []), seg('● changes requested by ', C.warn), ...people(item.changesBy, C.warn))
       rows.push(reviews.length ? reviews : [seg(REVIEW_WORD[item.review ?? ''] ?? 'no reviews yet', C.dim)])
       if (item.threads?.length) rows.push([seg(`${item.threads.length} open review thread${item.threads.length === 1 ? '' : 's'}`)])
       return rows
@@ -401,9 +408,9 @@ export const register: Register = (on) => {
         [seg(` ${STATE_WORD[item.state] ?? item.state} `, 'ansi256(0)', { backgroundColor: color(item), bold: true }), seg(`  ${item.repo} #${item.number}`, C.dim)],
         [seg(item.title, undefined, { bold: true })],
         ...facts(item),
-        [seg(short(item.url), C.link, { underline: true })],
+        [seg(short(item.url), C.link, { underline: true, href: item.url })],
         [seg('─'.repeat(INNER), C.dim)],
-        [seg('click the number expands · ctrl+click opens it', C.dim)],
+        [seg('ctrl+click opens a link', C.dim)],
       ])
 
     // A reference where the text has it: the state dot, the number as a link, the card on hover.
