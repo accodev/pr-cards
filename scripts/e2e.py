@@ -14,7 +14,8 @@ OUT = os.path.join(PLUGIN, "scripts", "e2e-out")
 ROWS, COLS = 50, 170
 # Nine lines first, so the card that opens upward has room above the reference.
 PROMPT = ("Reply with exactly this and use no tools: nine short paragraphs 'Line 1.' to 'Line 9.', each on its own line, "
-          "then the sentence '**PR #1306 fixed** the issue #1250.' with that markdown bold "
+          "then the sentence '**PR #1306 fixed** the issue #1250.' with that markdown bold, "
+          "then the sentence 'Merged in [#1318](https://github.com/fiskaltrust/market-it/pull/1318).' with that markdown link "
           "then a markdown table with columns '#' and 'Title' and two rows: 1318 'ci: submodule' and 1315 'feat: update (#1248)'.")
 
 os.makedirs(OUT, exist_ok=True)
@@ -98,6 +99,10 @@ try:
         bold_pr = pr_col >= 0 and screen.buffer[pos[1] - 1][pr_col].bold
     bold_ok = "**" not in line and bold_pr
     print("bold around reference:", bold_ok, repr(line.strip()))
+    # A markdown link to a PR gets the dot like a plain `#1318`.
+    md_link = find("Merged in ⬤ #1318") is not None
+    print("markdown link reference:", md_link)
+    bold_ok = bold_ok and md_link
     x, y = pos[0] + 3, pos[1]  # on the number, past the dot
     proc.write(f"\x1b[<35;{x};{y}M")  # SGR mouse: the pointer moves onto the number
     time.sleep(2)
@@ -155,7 +160,9 @@ try:
         proc.write(f"\x1b[<35;{row[0] + 3};{row[1]}M")
         time.sleep(2)
         dump("5-list-hover")
-        card = "Draft" in text() and "#1320" in text()
+        # #1320's state and checks change on GitHub: only its number is fixed.
+        card = "fiskaltrust/market-it #1320" in text()
+        failing_shown = "✖" in text()
         with lock:
             targets = set(m.decode("utf-8", "replace") for m in re.findall(rb"\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]+)", bytes(raw)))
         pr = "https://github.com/fiskaltrust/market-it/pull/1320"
@@ -163,7 +170,7 @@ try:
             "repo": "https://github.com/fiskaltrust/market-it" in targets,
             "files": pr + "/files" in targets,
             "checks": pr + "/checks" in targets,
-            "failing run": any("/actions/runs/" in t or "/runs/" in t for t in targets),
+            "failing run": not failing_shown or any("/runs/" in t for t in targets),
         }
         print("list hover card:", card, "links:", card_links)
         card = card and all(card_links.values())
