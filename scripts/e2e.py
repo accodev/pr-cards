@@ -128,6 +128,12 @@ try:
         author_link = "https://github.com/danielscainifiskaltrust" in targets
         pr_link = "https://github.com/fiskaltrust/market-it/pull/1306" in targets
     print("author link:", author_link, "pr link:", pr_link, "footer:", "ctrl+click opens a link" in text())
+    # The author is drawn without a solid underline, so the terminal's dotted hyperlink underline shows.
+    at = find("@danielscainifiskaltrust")
+    with lock:
+        solid = at is not None and screen.buffer[at[1] - 1][at[0] - 1].underscore
+    print("author solid underline:", solid)
+    author_link = author_link and at is not None and not solid
     hovered = hovered and author_link and pr_link and "ctrl+click opens a link" in text()
     proc.write(f"\x1b[<35;{x};{min(ROWS, y + 3)}M")  # the pointer leaves
     time.sleep(1)
