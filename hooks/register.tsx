@@ -32,6 +32,8 @@ const TTL_MS = 60_000
 const BATCH = 40
 // `#1234`, `owner/repo#1234` or a GitHub pull or issue URL; a `#` after a word character, `[`, `#` or `/` is a heading, an anchor or a link label.
 const REF = /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:pull|issues)\/(\d+)|(?<![\w[#/])(?:([\w.-]+\/[\w.-]+))?#(\d+)\b/g
+// The PR or issue a GitHub URL names, for a markdown link's target.
+const GITHUB_ITEM = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:pull|issues)\/(\d+)(?:[/?#].*)?$/
 // A table column of bare numbers is a list of PRs or issues when its header says so.
 const NUMBER_HEADER = /^(#|pr|prs|pull|issue|issues|number|no\.?)$/i
 const C = { open: 'ansi256(2)', merged: 'ansi256(5)', closed: 'ansi256(1)', draft: 'ansi256(8)', warn: 'ansi256(3)', link: 'ansi256(4)', dim: 'ansi256(8)', code: 'ansi256(6)' }
@@ -476,7 +478,10 @@ export const register: Register = (on) => {
           i = code + 1
         } else if (link) {
           flush()
-          out.push(Markdown({ text: link[0] }))
+          // Claude often writes a PR as a markdown link, `[#1338](…/pull/1338)`: that is a reference too,
+          // drawn with its own label.
+          const target = GITHUB_ITEM.exec(link[2]!)
+          out.push(target ? reference({ repo: target[1]!, number: Number(target[2]), label: link[1]! }) : Markdown({ text: link[0] }))
           i += link[0].length
         } else if (strong && (style.bold || text.indexOf(strong, i + 2) > 0)) {
           // A marker opens only when it closes later in the line, so a stray `**` stays text.
@@ -501,7 +506,9 @@ export const register: Register = (on) => {
     const width = (cell: string, numbered: boolean) =>
       numbered && /^\d{1,7}$/.test(cell)
         ? cell.length + 2
-        : pieces(cell).reduce((n, p) => n + ('ref' in p ? p.ref.label.length + 2 : p.text.replace(/\*\*|`/g, '').length), 0)
+        // A markdown link shows its label only; a PR or issue link also gets the dot and its space.
+        : pieces(cell.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label: string, href: string) => (GITHUB_ITEM.test(href) && !refsIn(label).length ? `${label}  ` : label)))
+            .reduce((n, p) => n + ('ref' in p ? p.ref.label.length + 2 : p.text.replace(/\*\*|`/g, '').length), 0)
 
     const table = (b: Extract<Block, { kind: 'table' }>) => {
       const count = b.header.length

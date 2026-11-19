@@ -103,6 +103,23 @@ test('keeps bold, italic and code around a reference inside them', async ($, on)
   expect(await ui.findAll({ type: 'Markdown', text: '[#1319](https://github.com/acme/pos-api/pull/1319)' })).toHaveLength(2)
 })
 
+test('treats a markdown link to a PR or issue as a reference, in text and in a table', async ($, on) => {
+  const clock = mock.clock(on)
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR, n1250: ISSUE } } }))))
+  const text = 'See [PR 1319](https://github.com/acme/pos-api/pull/1319).\n\n| Issue | PR | Notes |\n|---|---|---|\n| #1250 a till | [#1319](https://github.com/acme/pos-api/pull/1319) | [docs](https://example.com/x) |'
+  const ui = await $.ui.mount(message(text))
+  await clock.settle()
+  await clock.settle()
+  // Each PR link is drawn as a reference: the state dot, then its own label as the link.
+  const textLink = await ui.find({ type: 'Markdown', text: '[PR 1319](https://github.com/acme/pos-api/pull/1319)' })
+  expect(String(textLink?.props.key)).toMatch(/-link-/) // a reference's link, with its click handler
+  expect(await ui.findAll({ type: 'Markdown', text: '[#1319](https://github.com/acme/pos-api/pull/1319)' })).toHaveLength(1)
+  const dots = (await ui.findAll({ type: 'Text', text: '⬤ ' })).length
+  expect(dots).toBe(3) // PR 1319 in the text, #1250 and #1319 in the table
+  // Any other link stays a plain link.
+  expect(await ui.find({ type: 'Markdown', text: '[docs](https://example.com/x)' })).toBeDefined()
+})
+
 test('leaves a message without references to Claude Code', async ($, on) => {
   on('process.run', () => {
     throw new Error('gh must not run')
