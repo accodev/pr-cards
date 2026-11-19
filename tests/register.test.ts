@@ -51,6 +51,8 @@ test('draws references in text and in a numbers column with a dot, a link and th
   expect(await ui.find({ type: 'Text', text: '1 open review thread' })).toBeDefined()
   const links = (await ui.findAll({ type: 'Link' })).map((l) => l.props.href)
   expect(links).toContain('https://github.com/lgreen') // the author
+  // No solid underline on a card link: the terminal draws its own dotted one under a hyperlink.
+  expect((await ui.find({ type: 'Text', text: '@lgreen' }))?.props.underline).toBeFalsy()
   expect(links).toContain('https://github.com/mrossi') // a reviewer
   expect(links).toContain(PR.url)
   expect(links).toContain('https://github.com/acme/pos-api') // the repo in the header
