@@ -320,14 +320,15 @@ export const register: Register = (on) => {
     type Seg = { text: string; color?: string; bold?: boolean; underline?: boolean; backgroundColor?: string; href?: string }
     const profile = (login: string) => `https://github.com/${login}`
     // `@login` linked to the profile; the signed-in user reads "you", unlinked.
-    const person = (login: string, c?: string): Seg => (login === viewer ? { text: 'you', color: c } : { text: `@${login}`, color: c ?? C.link, underline: true, href: profile(login) })
-    // A run that ctrl+click opens: underlined in its own color, plain text when there is no target.
-    const linked = (text: string, href: string | undefined, c?: string): Seg => (href ? { text, color: c, underline: true, href } : { text, color: c })
+    const person = (login: string, c?: string): Seg => (login === viewer ? { text: 'you', color: c } : { text: `@${login}`, color: c ?? C.link, href: profile(login) })
+    // A run that ctrl+click opens, in its own color, plain text when there is no target. Links carry no
+    // underline of their own: the terminal draws its dotted hyperlink underline, which a solid one hides.
+    const linked = (text: string, href: string | undefined, c?: string): Seg => (href ? { text, color: c, href } : { text, color: c })
     // The title with its `#123`, `owner/repo#123` and GitHub URLs as links; GitHub sends an issue URL of a PR to the PR.
     const titleSegs = (item: Item): Seg[] =>
       pieces(item.title).map((p) =>
         'ref' in p
-          ? { text: p.ref.label, color: C.link, bold: true, underline: true, href: `https://github.com/${p.ref.repo ?? item.repo}/issues/${p.ref.number}` }
+          ? { text: p.ref.label, color: C.link, bold: true, href: `https://github.com/${p.ref.repo ?? item.repo}/issues/${p.ref.number}` }
           : { text: p.text, bold: true })
     const people = (logins: string[], c?: string): Seg[] => logins.flatMap((l, i) => [...(i ? [{ text: ', ', color: c }] : []), person(l, c)])
     // A fixed dark gray (#303030), as the mockup's card: palette black is the terminal background in
@@ -421,7 +422,7 @@ export const register: Register = (on) => {
         [seg(` ${STATE_WORD[item.state] ?? item.state} `, 'ansi256(0)', { backgroundColor: color(item), bold: true }), seg('  '), linked(item.repo, `https://github.com/${item.repo}`, C.dim), seg(' '), linked(`#${item.number}`, item.url, C.dim)],
         titleSegs(item),
         ...facts(item),
-        [seg(short(item.url), C.link, { underline: true, href: item.url })],
+        [seg(short(item.url), C.link, { href: item.url })],
         [seg('─'.repeat(INNER), C.dim)],
         [seg('ctrl+click opens a link', C.dim)],
       ])
@@ -558,7 +559,7 @@ export const register: Register = (on) => {
         item.kind === 'pr' && c
           ? [
               column(`CHECKS ${c.ok}/${c.total}`, [
-                ...(item.failing ?? []).slice(0, 4).map((f) => line([span('✖', C.closed), ' ', f.url ? Link({ href: f.url, children: [span(f.name, undefined, { underline: true })] }) : f.name])),
+                ...(item.failing ?? []).slice(0, 4).map((f) => line([span('✖', C.closed), ' ', f.url ? Link({ href: f.url, children: [span(f.name)] }) : f.name])),
                 ...(c.pending ? [line([span('●', C.warn), ` ${c.pending} running`])] : []),
                 line([span('✔', C.open), ` ${c.ok} passed`]),
               ]),
