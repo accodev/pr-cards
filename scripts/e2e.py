@@ -14,10 +14,11 @@ OUT = os.path.join(PLUGIN, "scripts", "e2e-out")
 ROWS, COLS = 50, 170
 # Nine lines first, so the card that opens upward has room above the reference.
 PROMPT = ("Reply with exactly this and use no tools: nine short paragraphs 'Line 1.' to 'Line 9.', each on its own line, "
-          "then the sentence 'PR #1306 fixed the issue #1250.' "
+          "then the sentence '**PR #1306 fixed** the issue #1250.' with that markdown bold "
           "then a markdown table with columns '#' and 'Title' and two rows: 1318 'ci: submodule' and 1315 'feat: update (#1248)'.")
 
 os.makedirs(OUT, exist_ok=True)
+sys.stdout.reconfigure(encoding="utf-8")  # screen lines hold ⬤, which the Windows console code page lacks
 screen = pyte.Screen(COLS, ROWS)
 stream = pyte.ByteStream(screen)
 lock = threading.Lock()
@@ -72,7 +73,7 @@ def find(s):
     return None
 
 
-hovered = clicked = False
+hovered = clicked = bold_ok = False
 try:
     if not wait(lambda t: "❯" in t, 60, "start"):
         sys.exit(1)
@@ -90,6 +91,13 @@ try:
     print("reference at", pos)
     if not pos:
         sys.exit(2)
+    # Bold around a reference: no `**` left in the reply, and "PR" before it drawn bold.
+    line = text().split("\n")[pos[1] - 1]
+    pr_col = line.find("PR")
+    with lock:
+        bold_pr = pr_col >= 0 and screen.buffer[pos[1] - 1][pr_col].bold
+    bold_ok = "**" not in line and bold_pr
+    print("bold around reference:", bold_ok, repr(line.strip()))
     x, y = pos[0] + 3, pos[1]  # on the number, past the dot
     proc.write(f"\x1b[<35;{x};{y}M")  # SGR mouse: the pointer moves onto the number
     time.sleep(2)
@@ -170,4 +178,4 @@ finally:
             proc.terminate(force=True)
     except OSError:
         pass  # already exiting after the second ctrl+c
-sys.exit(0 if hovered and clicked else 3)
+sys.exit(0 if hovered and clicked and bold_ok else 3)

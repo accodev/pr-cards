@@ -444,23 +444,57 @@ export const register: Register = (on) => {
       $.ui.invalidate('ui.render')
     }
 
-    // Inline markdown as words that wrap, so a reference can sit between them.
-    const styled = (text: string, base: { bold?: boolean } = {}): RenderElement[] => {
+    type Style = { bold?: boolean; italic?: boolean }
+
+    // Plain words that wrap one by one, with the references among them drawn in place.
+    const words = (text: string, style: Style): RenderElement[] =>
+      pieces(text).flatMap((p) =>
+        'ref' in p ? [reference(p.ref)] : p.text.split(/(?<=\s)/).filter(Boolean).map((w) => span(w.replace(/\s+$/, ' '), undefined, { ...style })))
+
+    // Inline markdown over the whole line first, references second: a reference can sit inside a bold
+    // or italic span, and splitting at it first would leave the span's markers unmatched, drawn as `**`.
+    const flow = (text: string, base: Style = {}): RenderElement[] => {
       const out: RenderElement[] = []
-      const TOKEN = /`([^`]+)`|\*\*([^*]+)\*\*|(?<![\w*])\*([^*\s][^*]*)\*(?![\w*])|\[([^\]]+)\]\((https?:[^)\s]+)\)|(\s+)|([^\s`*[]+|[`*[])/g
-      for (const m of text.matchAll(TOKEN)) {
-        if (m[1] !== undefined) out.push(span(m[1], C.code))
-        else if (m[2] !== undefined) out.push(...m[2].split(/(?<=\s)/).map((w) => span(w, undefined, { ...base, bold: true })))
-        else if (m[3] !== undefined) out.push(...m[3].split(/(?<=\s)/).map((w) => span(w, undefined, { ...base, italic: true })))
-        else if (m[4] !== undefined) out.push(Markdown({ text: `[${m[4]}](${m[5]})` }))
-        else if (m[6] !== undefined) out.push(span(' ', undefined, base))
-        else out.push(span(m[7]!, undefined, base))
+      const style: Style = { ...base }
+      let buffer = ''
+      const flush = () => {
+        if (buffer) out.push(...words(buffer, style))
+        buffer = ''
       }
+      let i = 0
+      while (i < text.length) {
+        const ch = text[i]!
+        const rest = text.slice(i)
+        const link = /^\[([^\]]+)\]\((https?:[^)\s]+)\)/.exec(rest)
+        const code = ch === '`' ? text.indexOf('`', i + 1) : -1
+        const strong = rest.startsWith('**') || rest.startsWith('__') ? rest.slice(0, 2) : ''
+        const before = text[i - 1] ?? ' '
+        const after = text[i + 1] ?? ' '
+        if (code > i) {
+          flush()
+          out.push(span(text.slice(i + 1, code), C.code, { bold: style.bold }))
+          i = code + 1
+        } else if (link) {
+          flush()
+          out.push(Markdown({ text: link[0] }))
+          i += link[0].length
+        } else if (strong && (style.bold || text.indexOf(strong, i + 2) > 0)) {
+          // A marker opens only when it closes later in the line, so a stray `**` stays text.
+          flush()
+          style.bold = !style.bold
+          i += 2
+        } else if ((ch === '*' || ch === '_') && (style.italic ? !/\s/.test(before) : !/[\w*]/.test(before) && !/\s/.test(after) && text.indexOf(ch, i + 1) > 0)) {
+          flush()
+          style.italic = !style.italic
+          i += 1
+        } else {
+          buffer += ch
+          i += 1
+        }
+      }
+      flush()
       return out
     }
-
-    const flow = (text: string, base: { bold?: boolean } = {}) =>
-      pieces(text).flatMap((p) => ('ref' in p ? [reference(p.ref)] : styled(p.text, base)))
 
     const row = (children: RenderElement[], extra: Record<string, unknown> = {}) => Box({ flexDirection: 'row', flexWrap: 'wrap', ...extra, children })
 

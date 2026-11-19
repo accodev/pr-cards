@@ -82,6 +82,27 @@ test('wraps a card row whose word fills the row exactly', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: 'c'.repeat(62) })).toBeDefined()
 })
 
+test('keeps bold, italic and code around a reference inside them', async ($, on) => {
+  const clock = mock.clock(on)
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR } } }))))
+  const text = '- **`AGENTS.md`**: the section\n- **PR #1319, now 3 files:** market_it_work, `validate/stage.md` and *also #1319 here*'
+  const ui = await $.ui.mount(message(text))
+  await clock.settle()
+  await clock.settle()
+
+  const texts = await ui.findAll({ type: 'Text' })
+  // No marker is left as text: the reported bug drew `**PR`.
+  expect(texts.filter((t) => /\*\*|(^|\s)\*\w/.test(String(t.text)))).toEqual([])
+  const style = (word: string) => texts.find((t) => t.text === word)?.props
+  expect(style('PR ')).toMatchObject({ bold: true })
+  expect(style('files:')).toMatchObject({ bold: true })
+  expect(style('market_it_work, ')?.bold).toBeFalsy() // snake_case is no italic marker
+  expect(style('AGENTS.md')).toMatchObject({ bold: true, color: 'ansi256(6)' }) // code inside bold
+  expect(style('validate/stage.md')).toMatchObject({ color: 'ansi256(6)' })
+  expect(style('also ')).toMatchObject({ italic: true })
+  expect(await ui.findAll({ type: 'Markdown', text: '[#1319](https://github.com/acme/pos-api/pull/1319)' })).toHaveLength(2)
+})
+
 test('leaves a message without references to Claude Code', async ($, on) => {
   on('process.run', () => {
     throw new Error('gh must not run')
