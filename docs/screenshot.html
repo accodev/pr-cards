@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>pr-cards screenshot</title>
+<!-- The README image: rendered to docs/screenshot.png with
+     msedge --headless --hide-scrollbars --window-size=1200,500 --screenshot=docs/screenshot.png docs/screenshot.html
+     The same drawing is the "Current" artboard of the Claude design canvas. -->
+<style>
+  body { margin: 0; background: #16181b; }
+  .term {
+    width: 1200px; height: 500px; box-sizing: border-box; padding: 22px 26px;
+    background: #1e2124; color: #d7dae0;
+    font: 15px/19px "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+    position: relative; overflow: hidden;
+  }
+  .l { white-space: pre; height: 19px; }
+  .dim { color: #7f848e; }
+  .b { font-weight: 700; }
+  .claude { color: #d97757; }
+  .prompt { background: #2a2d31; display: block; }
+  .open { color: #5fd35f; }
+  .merged { color: #c792ea; }
+  .draft { color: #8b8b8b; }
+  .red { color: #f07178; }
+  .warn { color: #e5c07b; }
+  .code { color: #56b6c2; }
+  /* A hyperlink: the terminal draws its dotted underline. */
+  .a { color: #61afef; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .ref { position: relative; }
+  .card {
+    position: absolute; left: 0; bottom: 19px; width: 66ch; padding: 19px 2ch;
+    box-sizing: border-box; background: #303030; white-space: pre; z-index: 2;
+  }
+  .card .l { height: 19px; }
+  .badge { background: #5fd35f; color: #101010; font-weight: 700; }
+  .pointer { position: absolute; width: 14px; height: 20px; z-index: 3; }
+</style>
+</head>
+<body>
+<div class="term">
+<div class="l dim"><span class="claude">✻</span> Claude Code · ~/code/pos-api</div>
+<div class="l"> </div>
+<div class="l prompt">&gt; which PRs is wave 4 waiting on?</div>
+<div class="l"> </div>
+<div class="l dim">  Ran 1 shell command</div>
+<div class="l"><span class="claude">●</span> <span class="b">PR <span class="merged">⬤</span> <span class="a">#1306</span> fixed</span> the issue <span class="open">⬤</span> <span class="a">#1250</span>. Wave 4 waits on three PRs, all from <span class="code">release/4</span>:</div>
+<div class="l"> </div>
+<div class="l">  ┌──────────┬──────────┬────────┬───────────────────────────────────────────────────┐</div>
+<div class="l">  │ <span class="b">  Issue  </span>│ <span class="b">   PR   </span> │ <span class="b">State </span> │ <span class="b">                      Notes                      </span> │</div>
+<div class="l">  ├──────────┼──────────┼────────┼───────────────────────────────────────────────────┤</div>
+<div class="l">  │ <span class="open">⬤</span> <span class="a">#1251</span>  │ <span class="ref"><span class="open">⬤</span> <span class="a">#1338</span><div class="card"><div class="l"><span class="badge"> Open </span>  <span class="a dim">acme/pos-api</span> <span class="a dim">#1338</span></div><div class="l b">feat(trs): the fiscal module comes back after a failure</div><div class="l b">(<span class="a">#1251</span>)</div><div class="l"><span class="a">@lgreen</span><span class="dim"> · opened 2 days ago · </span><span class="open">+412</span> <span class="red">−37</span><span class="dim"> · </span><span class="a dim">9 files</span></div><div class="l"><span class="open">✔</span> <span class="a" style="color:inherit">7 of 8 checks</span> · <span class="red">✖ </span><span class="a red">e2e / it-receipts</span></div><div class="l"><span class="open">✔</span> approved by <span class="a">@mrossi</span> · <span class="warn">● changes requested by you</span></div><div class="l"><span class="a" style="color:inherit">3 open review threads</span></div><div class="l"><span class="a">github.com/acme/pos-api/pull/1338</span></div></div></span>  │ open   │ the MF1 comes back after a failure                │</div>
+<div class="l">  ├──────────┼──────────┼────────┼───────────────────────────────────────────────────┤</div>
+<div class="l">  │ <span class="open">⬤</span> <span class="a">#1252</span>  │ <span class="merged">⬤</span> <span class="a">#1336</span>  │ merged │ the MF1 on Windows with 32 bits                   │</div>
+<div class="l">  ├──────────┼──────────┼────────┼───────────────────────────────────────────────────┤</div>
+<div class="l">  │ <span class="open">⬤</span> <span class="a">#1256</span>  │ <span class="draft">⬤</span> <span class="a">#1337</span>  │ draft  │ the test screen sells through the MF1, follow-up  │</div>
+<div class="l">  │          │          │        │ in <span class="open">⬤</span> <span class="a">#1335</span>                                        │</div>
+<div class="l">  └──────────┴──────────┴────────┴───────────────────────────────────────────────────┘</div>
+<div class="l"> </div>
+<div class="l"><span class="open">⬤</span> <span class="a">#1253</span> starts once <span class="open">⬤</span> <span class="a">#1338</span> is merged.</div>
+<div class="l"> </div>
+<div class="l dim">✻ Worked for 12s</div>
+<div class="l"> </div>
+<div class="l dim">──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</div>
+<div class="l">&gt; </div>
+<svg class="pointer" style="left: 196px; top: 216px" viewBox="0 0 14 20" aria-hidden="true"><path d="M1 1 L1 16 L5 12 L8 19 L10 18 L7 11 L12 11 Z" fill="#ffffff" stroke="#000" stroke-width="1"/></svg>
+</div>
+</body>
+</html>
