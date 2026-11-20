@@ -139,6 +139,24 @@ test('treats a markdown link to a PR or issue as a reference, in text and in a t
   expect(await ui.find({ type: 'Markdown', text: '[docs](https://example.com/x)' })).toBeDefined()
 })
 
+test('leaves row numbers and numbers GitHub does not know as plain text', async ($, on) => {
+  const clock = mock.clock(on)
+  // GitHub answers null for #999: no such PR or issue.
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR, n999: null } } }))))
+  const rows = '| # | Card |\n|---|---|\n| 7 | One row |\n| 8 | Two rows |\n| 9 | GitHub card |'
+  const ui = await $.ui.mount(message(`${rows}\n\nSee #1319 and #999.`))
+  await clock.settle()
+  await clock.settle()
+  // The numbered column counts 7, 8, 9: row numbers, so the table stays Claude Code's own.
+  expect(await ui.find({ type: 'Markdown', text: rows })).toBeDefined()
+  expect(await ui.find({ type: 'Markdown', text: '[#1319](https://github.com/acme/pos-api/pull/1319)' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '#999' })).toBeDefined()
+  const texts = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
+  expect(texts.filter((t) => t.startsWith('⬤'))).toHaveLength(1) // only #1319
+  // One cross only: #1319's card lists its failing check; #999 gets no failed-lookup cross.
+  expect(texts.filter((t) => t.startsWith('✖'))).toHaveLength(1)
+})
+
 test('leaves a message without references to Claude Code', async ($, on) => {
   on('process.run', () => {
     throw new Error('gh must not run')
