@@ -157,6 +157,24 @@ test('leaves row numbers and numbers GitHub does not know as plain text', async 
   expect(texts.filter((t) => t.startsWith('✖'))).toHaveLength(1)
 })
 
+test('draws the one-row card when cardStyle is row', { options: { cardStyle: 'row' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR } } }))))
+  const ui = await $.ui.mount(message('See #1319.'))
+  await clock.settle()
+  await clock.settle()
+  const texts = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
+  // One row: state word, title, author, checks with the failing count's color, the review that asks for changes.
+  expect(texts).toContain('⬤ open  ')
+  expect(texts).toContain('fix: round VAT per line')
+  expect(texts).toContain('✖ 1/2')
+  expect(texts).toContain('you')
+  // None of the full card's rows.
+  expect(texts.some((t) => t === ' Open ' || t.includes('open review thread') || t.includes('approved by'))).toBe(false)
+  const links = (await ui.findAll({ type: 'Link' })).map((l) => l.props.href)
+  expect(links).toEqual(expect.arrayContaining([PR.url, 'https://github.com/lgreen', `${PR.url}/checks`]))
+})
+
 test('leaves a message without references to Claude Code', async ($, on) => {
   on('process.run', () => {
     throw new Error('gh must not run')

@@ -1,6 +1,14 @@
 {
   "name": "pr-cards",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "license": "MIT",
-  "description": "GitHub pull request chips with hover cards in the Claude Code transcript."
+  "description": "GitHub pull request chips with hover cards in the Claude Code transcript.",
+  "userConfig": {
+    "cardStyle": {
+      "type": "string",
+      "title": "Card style",
+      "description": "How the hover card looks: card, the full card with checks, reviews and threads; or row, everything on one faint row.",
+      "default": "card"
+    }
+  }
 }
