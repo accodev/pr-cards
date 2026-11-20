@@ -25,7 +25,8 @@ type Item = {
   files?: { path: string; additions: number; deletions: number }[]
   comments?: number
 }
-type Entry = { item?: Item; error?: string; at: number; loading: boolean }
+// `missing`: GitHub has no PR or issue with that number, so the text was no reference after all.
+type Entry = { item?: Item; error?: string; missing?: boolean; at: number; loading: boolean }
 type Ref = { repo: string | null; number: number; label: string }
 
 const TTL_MS = 60_000
@@ -91,11 +92,19 @@ type Block =
   | { kind: 'paragraph'; lines: string[] }
   | { kind: 'list'; items: { indent: number; marker: string; text: string }[] }
   | { kind: 'heading'; level: number; text: string }
-  | { kind: 'table'; header: string[]; rows: string[][]; numbered: boolean[] }
+  // `source`: the table as Claude wrote it, for Claude Code to draw when it holds no reference.
+  | { kind: 'table'; header: string[]; rows: string[][]; numbered: boolean[]; source: string }
 
 const isTableRow = (line: string) => /^\s*\|.*\|\s*$/.test(line)
 const isRule = (line: string) => /^\s*\|[\s:|-]+\|\s*$/.test(line)
 const LIST = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/
+
+// A `#` column counting 1, 2, 3 (or 7, 8, 9) numbers the rows; a list of PRs does not count up from so low.
+function isRowIndex(values: string[]) {
+  const numbers = values.map((v) => (/^\d{1,7}$/.test(v.trim()) ? Number(v) : NaN))
+  if (numbers.some(Number.isNaN) || numbers[0]! > 20) return false
+  return numbers.every((n, i) => i === 0 || n === numbers[i - 1]! + 1)
+}
 
 function cells(line: string) {
   const out: string[] = []
@@ -126,9 +135,10 @@ function blocks(text: string): Block[] {
     if (isTableRow(line) && i + 1 < lines.length && isRule(lines[i + 1]!)) {
       const header = cells(line)
       const rows: string[][] = []
+      const start = i
       i += 2
       while (i < lines.length && isTableRow(lines[i]!)) rows.push(cells(lines[i++]!))
-      out.push({ kind: 'table', header, rows, numbered: header.map((h) => NUMBER_HEADER.test(h)) })
+      out.push({ kind: 'table', header, rows, numbered: header.map((h, c) => NUMBER_HEADER.test(h) && !isRowIndex(rows.map((r) => r[c] ?? ''))), source: lines.slice(start, i).join('\n') })
       continue
     }
     const heading = /^(#{1,6})\s+(.*)$/.exec(line)
@@ -157,7 +167,7 @@ const blockText = (b: Block): string =>
     : b.kind === 'paragraph' ? b.lines.join('\n')
       : b.kind === 'heading' ? `${'#'.repeat(b.level)} ${b.text}`
         : b.kind === 'list' ? b.items.map((it) => `${' '.repeat(it.indent)}${it.marker} ${it.text}`).join('\n')
-          : [b.header, b.header.map(() => '---'), ...b.rows].map((r) => `| ${r.join(' | ')} |`).join('\n')
+          : b.source
 
 function blockRefs(b: Block): Ref[] {
   if (b.kind === 'markdown') return []
@@ -228,7 +238,7 @@ async function fetchChunk($: EngineInterface, repo: string, numbers: number[]) {
     if (!found) return fail(body.errors?.[0]?.message ?? (out.stderr.trim().split('\n')[0] || `gh exited ${out.exitCode}`))
     for (const n of numbers) {
       const raw = found[`n${n}`]
-      cache.set(keyFor(repo, n), raw ? { at: Date.now(), loading: false, item: toItem(repo, raw) } : { at: Date.now(), loading: false, error: `no PR or issue #${n} in ${repo}` })
+      cache.set(keyFor(repo, n), raw ? { at: Date.now(), loading: false, item: toItem(repo, raw) } : { at: Date.now(), loading: false, missing: true })
     }
   } catch (err) {
     fail(String(err))
@@ -429,6 +439,8 @@ export const register: Register = (on) => {
     // A reference where the text has it: the state dot, the number as a link, the card on hover.
     const reference = (ref: Ref) => {
       const entry = entryOf(ref)
+      // No such PR or issue: the number stays the text Claude wrote, with no dot and no card.
+      if (entry?.missing) return span(ref.label)
       const item = entry?.item
       // A gray filled dot is a draft; loading is hollow and a failed lookup a cross, so neither reads as a state.
       const dot = item ? span(`${DOT} `, color(item)) : entry?.error ? span('✖ ', C.closed) : span('○ ', C.dim)
@@ -438,6 +450,9 @@ export const register: Register = (on) => {
       const pop = item ? [card(item)] : entry?.error ? [popup([[seg(entry.error, C.closed)]])] : []
       return Box({ key: `${id}-ref-${serial++}`, flexShrink: 0, children: [dot, label, ...pop] })
     }
+
+    // The cells a reference takes: its label, plus the dot and a space unless it turned out missing.
+    const refWidth = (ref: Ref) => ref.label.length + (entryOf(ref)?.missing ? 0 : 2)
 
     const toggle = (href: string) => {
       const k = `${id}:${href}`
@@ -459,7 +474,7 @@ export const register: Register = (on) => {
     // Plain words that wrap one by one, with the references among them drawn in place.
     const words = (text: string, style: Style): Atom[] =>
       pieces(text).flatMap((p) =>
-        'ref' in p ? [element(reference(p.ref), p.ref.label.length + 2)] : p.text.split(/(?<=\s)/).filter(Boolean).map((w) => word(w.replace(/\s+$/, ' '), style)))
+        'ref' in p ? [element(reference(p.ref), refWidth(p.ref))] : p.text.split(/(?<=\s)/).filter(Boolean).map((w) => word(w.replace(/\s+$/, ' '), style)))
 
     // Inline markdown over the whole line first, references second: a reference can sit inside a bold
     // or italic span, and splitting at it first would leave the span's markers unmatched, drawn as `**`.
@@ -491,7 +506,10 @@ export const register: Register = (on) => {
           // drawn with its own label.
           const target = GITHUB_ITEM.exec(link[2]!)
           out.push(target
-            ? element(reference({ repo: target[1]!, number: Number(target[2]), label: link[1]! }), link[1]!.length + 2)
+            ? (() => {
+                const ref = { repo: target[1]!, number: Number(target[2]), label: link[1]! }
+                return element(reference(ref), refWidth(ref))
+              })()
             : element(Markdown({ text: link[0] }), link[1]!.length))
           i += link[0].length
         } else if (strong && (style.bold || text.indexOf(strong, i + 2) > 0)) {
@@ -550,7 +568,9 @@ export const register: Register = (on) => {
       const head = b.header.map((h) => atoms(h, { bold: true }))
       const body = b.rows.map((r) => b.header.map((_, c) => {
         const text = r[c] ?? ''
-        return b.numbered[c] && /^\d{1,7}$/.test(text) ? [element(reference({ repo: null, number: Number(text), label: text }), text.length + 2)] : atoms(text)
+        if (!b.numbered[c] || !/^\d{1,7}$/.test(text)) return atoms(text)
+        const ref = { repo: null, number: Number(text), label: text }
+        return [element(reference(ref), refWidth(ref))]
       }))
       const measure = (list: Atom[]) => list.reduce((n, a) => n + a.w, 0) - (list.length && list[list.length - 1]!.text?.endsWith(' ') ? 1 : 0)
       const widths = b.header.map((_, c) => Math.max(1, measure(head[c]!), ...body.map((r) => measure(r[c]!))))
