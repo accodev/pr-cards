@@ -2,6 +2,8 @@
 
 A Claude Code mod that turns GitHub pull request and issue references in Claude's replies into live links.
 
+![A Claude Code reply with state dots on each PR and issue reference, a bordered table, and the hover card of a PR showing its state, author, size, checks, reviews and threads](docs/screenshot.png)
+
 - `#1234`, `owner/repo#1234`, GitHub URLs and the numbers in a table column headed `#`, `PR` or `Issue` get a dot in the state's color: green open, gray draft, purple merged, red closed.
 - Hovering a reference opens a card: state, title, author, age, size, checks, reviews and open threads.
 - Every reference in the card is a link: repo, title references, author, reviewers, files, checks and the failing check's run. Ctrl+click opens it.

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>pr-cards screenshot</title>
+<!-- The README image, with made-up data: rendered to docs/screenshot.png with
+     msedge --headless --hide-scrollbars --no-first-run --user-data-dir=<tmp> --window-size=1200,500 --screenshot=<png> <this file> -->
+<style>
+  body { margin: 0; background: #16181b; }
+  .term {
+    width: 1200px; height: 500px; box-sizing: border-box; padding: 22px 26px;
+    background: #1e2124; color: #d7dae0;
+    font: 15px/19px "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+    position: relative; overflow: hidden;
+  }
+  .l { white-space: pre; height: 19px; }
+  .dim { color: #7f848e; }
+  .b { font-weight: 700; }
+  .claude { color: #d97757; }
+  .prompt { background: #2a2d31; display: block; }
+  .open { color: #5fd35f; }
+  .merged { color: #c792ea; }
+  .draft { color: #8b8b8b; }
+  .red { color: #f07178; }
+  .warn { color: #e5c07b; }
+  .code { color: #56b6c2; }
+  /* A hyperlink: the terminal draws its dotted underline. */
+  .a { color: #61afef; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .ref { position: relative; }
+  .card {
+    position: absolute; left: 0; bottom: 19px; width: 66ch; padding: 19px 2ch;
+    box-sizing: border-box; background: #303030; white-space: pre; z-index: 2;
+  }
+  .badge { background: #5fd35f; color: #101010; font-weight: 700; }
+  .pointer { position: absolute; width: 14px; height: 20px; z-index: 3; }
+</style>
+</head>
+<body>
+<div class="term">
+<div class="l dim"><span class="claude">✻</span> Claude Code · ~/code/shop</div>
+<div class="l"> </div>
+<div class="l prompt">&gt; which PRs does the release wait on?</div>
+<div class="l"> </div>
+<div class="l dim">  Ran 1 shell command</div>
+<div class="l"><span class="claude">●</span> <span class="b">PR <span class="merged">⬤</span> <span class="a">#42</span> fixed</span> the issue <span class="open">⬤</span> <span class="a">#37</span>. The release waits on three PRs, all from <span class="code">release/2.0</span>:</div>
+<div class="l"> </div>
+<div class="l">  ┌────────┬────────┬────────┬───────────────────────────────────────────────────┐</div>
+<div class="l">  │ <span class="b"> Issue </span>│ <span class="b">  PR  </span> │ <span class="b">State </span> │ <span class="b">                      Notes                      </span> │</div>
+<div class="l">  ├────────┼────────┼────────┼───────────────────────────────────────────────────┤</div>
+<div class="l">  │ <span class="open">⬤</span> <span class="a">#51</span>  │ <span class="ref"><span class="open">⬤</span> <span class="a">#58</span><div class="card"><div class="l"><span class="badge"> Open </span>  <span class="a dim">acme/shop</span> <span class="a dim">#58</span></div><div class="l b">fix(cart): keep the discount when the last item is removed</div><div class="l b">(<span class="a">#51</span>)</div><div class="l"><span class="a">@alex</span><span class="dim"> · opened 2 days ago · </span><span class="open">+128</span> <span class="red">−14</span><span class="dim"> · </span><span class="a dim">6 files</span></div><div class="l"><span class="open">✔</span> <span class="a" style="color:inherit">7 of 8 checks</span> · <span class="red">✖ </span><span class="a red">e2e / checkout</span></div><div class="l"><span class="open">✔</span> approved by <span class="a">@sam</span> · <span class="warn">● changes requested by you</span></div><div class="l"><span class="a" style="color:inherit">2 open review threads</span></div><div class="l"><span class="a">github.com/acme/shop/pull/58</span></div></div></span>  │ open   │ the cart keeps its discount when it empties       │</div>
+<div class="l">  ├────────┼────────┼────────┼───────────────────────────────────────────────────┤</div>
+<div class="l">  │ <span class="open">⬤</span> <span class="a">#52</span>  │ <span class="merged">⬤</span> <span class="a">#56</span>  │ merged │ prices in the user's currency                     │</div>
+<div class="l">  ├────────┼────────┼────────┼───────────────────────────────────────────────────┤</div>
+<div class="l">  │ <span class="open">⬤</span> <span class="a">#53</span>  │ <span class="draft">⬤</span> <span class="a">#57</span>  │ draft  │ dark mode for the checkout page, follow-up in     │</div>
+<div class="l">  │        │        │        │ <span class="open">⬤</span> <span class="a">#55</span>                                             │</div>
+<div class="l">  └────────┴────────┴────────┴───────────────────────────────────────────────────┘</div>
+<div class="l"> </div>
+<div class="l"><span class="open">⬤</span> <span class="a">#54</span> starts once <span class="open">⬤</span> <span class="a">#58</span> is merged.</div>
+<div class="l"> </div>
+<div class="l dim">✻ Worked for 12s</div>
+<div class="l"> </div>
+<div class="l dim">──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</div>
+<div class="l">&gt; </div>
+<svg class="pointer" style="left: 180px; top: 216px" viewBox="0 0 14 20" aria-hidden="true"><path d="M1 1 L1 16 L5 12 L8 19 L10 18 L7 11 L12 11 Z" fill="#ffffff" stroke="#000" stroke-width="1"/></svg>
+</div>
+</body>
+</html>
