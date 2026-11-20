@@ -12,6 +12,10 @@ type Item = {
   author: string
   // `opened 2 days ago`, `merged 3 hours ago`...
   when: string
+  // When it was opened, ISO, and for a PR its head and base branch.
+  created?: string
+  head?: string
+  base?: string
   additions?: number
   deletions?: number
   changedFiles?: number
@@ -43,9 +47,14 @@ const STATE_WORD: Record<string, string> = { OPEN: 'Open', DRAFT: 'Draft', MERGE
 const REVIEW_WORD: Record<string, string> = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes requested', REVIEW_REQUIRED: 'review required' }
 const DOT = '⬤'
 const CARD_WIDTH = 66
-// The one-row card: at most this many cells wide, on a fill fainter than the full card's.
-const ROW_MAX = 96
-const ROW_BG = 'ansi256(235)'
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+// `Nov 18`, as GitHub dates a card; the year only when it is not this one.
+const day = (iso?: string) => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const year = d.getUTCFullYear() === new Date().getUTCFullYear() ? '' : `, ${d.getUTCFullYear()}`
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}${year}`
+}
 
 const cache = new Map<string, Entry>()
 const expanded = new Set<string>()
@@ -208,7 +217,7 @@ function want($: EngineInterface, ref: Ref) {
 
 const FIELDS = `
   __typename
-  ... on PullRequest { number title url state isDraft author { login } additions deletions changedFiles reviewDecision createdAt mergedAt closedAt
+  ... on PullRequest { number title url state isDraft author { login } additions deletions changedFiles reviewDecision createdAt mergedAt closedAt headRefName baseRefName
     statusCheckRollup { contexts(first: 100) { totalCount checkRunCountsByState { state count } statusContextCountsByState { state count }
       nodes { __typename ... on CheckRun { name conclusion detailsUrl } ... on StatusContext { context state targetUrl } } } }
     latestReviews(first: 20) { nodes { state author { login } } }
@@ -253,7 +262,7 @@ type Raw = {
   __typename: 'PullRequest' | 'Issue'
   number: number; title: string; url: string; state: string; isDraft?: boolean; stateReason?: string | null
   author?: { login: string } | null; additions?: number; deletions?: number; changedFiles?: number; reviewDecision?: string | null
-  createdAt?: string; mergedAt?: string | null; closedAt?: string | null
+  createdAt?: string; mergedAt?: string | null; closedAt?: string | null; headRefName?: string | null; baseRefName?: string | null
   statusCheckRollup?: {
     contexts: {
       totalCount: number; checkRunCountsByState?: Count[]; statusContextCountsByState?: Count[]
@@ -281,7 +290,7 @@ function toItem(repo: string, raw: Raw): Item {
   if (raw.__typename === 'Issue') {
     const state = raw.state === 'OPEN' ? 'OPEN' : raw.stateReason === 'NOT_PLANNED' ? 'NOT_PLANNED' : 'COMPLETED'
     const when = state === 'OPEN' ? `opened ${ago(raw.createdAt)}` : `closed ${ago(raw.closedAt)}`
-    return { kind: 'issue', number: raw.number, repo, title: raw.title, url: raw.url, state, author, when, comments: raw.comments?.totalCount ?? 0 }
+    return { kind: 'issue', number: raw.number, repo, title: raw.title, url: raw.url, state, author, when, created: raw.createdAt, comments: raw.comments?.totalCount ?? 0 }
   }
   const contexts = raw.statusCheckRollup?.contexts
   const counts = [...(contexts?.checkRunCountsByState ?? []), ...(contexts?.statusContextCountsByState ?? [])]
@@ -296,6 +305,7 @@ function toItem(repo: string, raw: Raw): Item {
   const when = state === 'MERGED' ? `merged ${ago(raw.mergedAt)}` : state === 'CLOSED' ? `closed ${ago(raw.closedAt)}` : `opened ${ago(raw.createdAt)}`
   return {
     kind: 'pr', number: raw.number, repo, title: raw.title, url: raw.url, state, author, when,
+    created: raw.createdAt, head: raw.headRefName ?? undefined, base: raw.baseRefName ?? undefined,
     additions: raw.additions, deletions: raw.deletions, changedFiles: raw.changedFiles,
     review: raw.reviewDecision ?? undefined, checks: { ok, failed, pending: Math.max(0, total - ok - failed), total }, failing,
     approvedBy: by('APPROVED'), changesBy: by('CHANGES_REQUESTED'),
@@ -311,8 +321,8 @@ const short = (url: string) => url.replace(/^https:\/\//, '')
 // ---------- Drawing ----------
 
 export const register: Register = (on, options) => {
-  // `card` (the default) or `row`, from the plugin's settings.
-  const style = String(options.cardStyle ?? 'card').trim().toLowerCase() === 'row' ? 'row' : 'card'
+  // `card` (the default) or `github`, from the plugin's settings.
+  const style = String(options.cardStyle ?? 'card').trim().toLowerCase() === 'github' ? 'github' : 'card'
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const parsed = blocks(e.props.text)
     const refs = parsed.flatMap(blockRefs)
@@ -437,27 +447,26 @@ export const register: Register = (on, options) => {
         [seg(short(item.url), C.link, { href: item.url })],
       ])
 
-    // `cardStyle: row`: the whole card on one faint row, as design 7: state, title, author, checks, review.
-    const rowCard = (item: Item) => {
-      const tail: Seg[] = [seg('  '), person(item.author)]
-      if (item.kind === 'issue') tail.push(seg(' · ', C.dim), linked(`${item.comments} comments`, item.url, C.dim))
-      const c = item.checks
-      if (c?.total) {
-        tail.push(seg(' · ', C.dim), c.failed ? linked(`✖ ${c.ok}/${c.total}`, `${item.url}/checks`, C.closed) : linked(`✔ ${c.ok}/${c.total}`, `${item.url}/checks`, C.open))
+    // `cardStyle: github`, design 9, laid out as GitHub's own hover card: the repo and the day it was
+    // opened; the state dot, title and number; the branches; one footer row with the review and checks.
+    const githubCard = (item: Item) => {
+      const repoUrl = `https://github.com/${item.repo}`
+      const rows: Seg[][] = [
+        [linked(item.repo, repoUrl, C.link), seg(` on ${day(item.created)}`, C.dim)],
+        [],
+        [seg(`${DOT} `, color(item)), ...titleSegs(item), seg(' '), linked(`#${item.number}`, item.url, C.dim)],
+      ]
+      if (item.head && item.base) {
+        rows.push([linked(item.head, `${repoUrl}/tree/${item.head}`, C.code), seg(' → ', C.dim), linked(item.base, `${repoUrl}/tree/${item.base}`, C.code)])
       }
-      if (item.changesBy?.length) tail.push(seg(' · ', C.dim), seg('● ', C.warn), ...people(item.changesBy, C.warn))
-      else if (item.approvedBy?.length) tail.push(seg(' · ', C.dim), seg('✔ ', C.open), ...people(item.approvedBy, C.open))
-      const head = `${DOT} ${(STATE_WORD[item.state] ?? item.state).toLowerCase()}  `
-      const used = head.length + tail.reduce((n, s) => n + s.text.length, 0)
-      // The title gives way so the row stays within ROW_MAX cells; it keeps at least 20.
-      const room = Math.max(20, ROW_MAX - 2 - used)
-      const title = item.title.length > room ? `${item.title.slice(0, room - 1)}…` : item.title
-      const row: Seg[] = [seg(head, color(item)), { text: title, bold: true, href: item.url }, ...tail]
-      const width = row.reduce((n, s) => n + s.text.length, 0) + 2
-      return Box({
-        position: 'absolute', bottom: 1, left: 0, display: 'none', hover: { display: 'flex' }, width,
-        children: [Text({ backgroundColor: ROW_BG, children: [' ', ...runs(row, ROW_BG), ' '] })],
-      })
+      const foot: Seg[] = []
+      if (item.kind === 'issue') foot.push(person(item.author), seg(` · ${item.when} · `, C.dim), linked(`${item.comments} comments`, item.url, C.dim))
+      else if (item.changesBy?.length) foot.push(seg('● changes requested by ', C.warn), ...people(item.changesBy, C.warn))
+      else if (item.approvedBy?.length) foot.push(seg('✔ approved by ', C.open), ...people(item.approvedBy, C.open))
+      else foot.push(seg(REVIEW_WORD[item.review ?? ''] ?? 'no reviews yet', C.dim))
+      const c = item.checks
+      if (c?.total) foot.push(seg(' · ', C.dim), linked(`${c.failed ? '✖' : '✔'} ${c.ok} of ${c.total} checks`, `${item.url}/checks`, c.failed ? C.closed : C.open))
+      return popup([...rows, [], foot])
     }
 
     // A reference where the text has it: the state dot, the number as a link, the card on hover.
@@ -471,7 +480,7 @@ export const register: Register = (on, options) => {
       const label = item
         ? Markdown({ key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})`, pressableLinks: [item.url], onLinkPress: (link) => toggle(link.href) })
         : span(ref.label, C.link, { underline: true })
-      const pop = item ? [style === 'row' ? rowCard(item) : card(item)] : entry?.error ? [popup([[seg(entry.error, C.closed)]])] : []
+      const pop = item ? [style === 'github' ? githubCard(item) : card(item)] : entry?.error ? [popup([[seg(entry.error, C.closed)]])] : []
       return Box({ key: `${id}-ref-${serial++}`, flexShrink: 0, children: [dot, label, ...pop] })
     }
 
