@@ -306,7 +306,8 @@ export const register: Register = (on) => {
 
     const { Box, Text, Markdown, Link } = $.ui.resolve(e)
     const id = `pr-${e.requestId}`
-    const columns = Math.max(40, (e.viewport?.columns ?? 100) - 2)
+    // The reply's room: the terminal less its two-cell indent.
+    const columns = Math.max(20, (e.viewport?.columns ?? 100) - 2)
     let serial = 0
 
     type Part = string | RenderElement
@@ -423,8 +424,6 @@ export const register: Register = (on) => {
         titleSegs(item),
         ...facts(item),
         [seg(short(item.url), C.link, { href: item.url })],
-        [seg('─'.repeat(INNER), C.dim)],
-        [seg('ctrl+click opens a link', C.dim)],
       ])
 
     // A reference where the text has it: the state dot, the number as a link, the card on hover.
@@ -449,15 +448,24 @@ export const register: Register = (on) => {
 
     type Style = { bold?: boolean; italic?: boolean }
 
+    // One unit of inline layout and the cells it takes: a word with its trailing space, a code span, a
+    // link or a reference. A table wraps its cells by these widths itself, so its bars match each row.
+    type Atom = { el: RenderElement; w: number; text?: string; color?: string; style?: Style }
+    const word = (text: string, style: Style, c?: string): Atom => ({ el: span(text, c, { ...style }), w: text.length, text, color: c, style })
+    const element = (el: RenderElement, w: number): Atom => ({ el, w })
+    // Without its trailing space: what must fit before the line ends.
+    const inner = (a: Atom) => (a.text !== undefined ? a.text.trimEnd().length : a.w)
+
     // Plain words that wrap one by one, with the references among them drawn in place.
-    const words = (text: string, style: Style): RenderElement[] =>
+    const words = (text: string, style: Style): Atom[] =>
       pieces(text).flatMap((p) =>
-        'ref' in p ? [reference(p.ref)] : p.text.split(/(?<=\s)/).filter(Boolean).map((w) => span(w.replace(/\s+$/, ' '), undefined, { ...style })))
+        'ref' in p ? [element(reference(p.ref), p.ref.label.length + 2)] : p.text.split(/(?<=\s)/).filter(Boolean).map((w) => word(w.replace(/\s+$/, ' '), style)))
 
     // Inline markdown over the whole line first, references second: a reference can sit inside a bold
     // or italic span, and splitting at it first would leave the span's markers unmatched, drawn as `**`.
-    const flow = (text: string, base: Style = {}): RenderElement[] => {
-      const out: RenderElement[] = []
+    const flow = (text: string, base: Style = {}): RenderElement[] => atoms(text, base).map((a) => a.el)
+    const atoms = (text: string, base: Style = {}): Atom[] => {
+      const out: Atom[] = []
       const style: Style = { ...base }
       let buffer = ''
       const flush = () => {
@@ -475,14 +483,16 @@ export const register: Register = (on) => {
         const after = text[i + 1] ?? ' '
         if (code > i) {
           flush()
-          out.push(span(text.slice(i + 1, code), C.code, { bold: style.bold }))
+          out.push(word(text.slice(i + 1, code), { bold: style.bold }, C.code))
           i = code + 1
         } else if (link) {
           flush()
           // Claude often writes a PR as a markdown link, `[#1338](…/pull/1338)`: that is a reference too,
           // drawn with its own label.
           const target = GITHUB_ITEM.exec(link[2]!)
-          out.push(target ? reference({ repo: target[1]!, number: Number(target[2]), label: link[1]! }) : Markdown({ text: link[0] }))
+          out.push(target
+            ? element(reference({ repo: target[1]!, number: Number(target[2]), label: link[1]! }), link[1]!.length + 2)
+            : element(Markdown({ text: link[0] }), link[1]!.length))
           i += link[0].length
         } else if (strong && (style.bold || text.indexOf(strong, i + 2) > 0)) {
           // A marker opens only when it closes later in the line, so a stray `**` stays text.
@@ -504,38 +514,81 @@ export const register: Register = (on) => {
 
     const row = (children: RenderElement[], extra: Record<string, unknown> = {}) => Box({ flexDirection: 'row', flexWrap: 'wrap', ...extra, children })
 
-    const width = (cell: string, numbered: boolean) =>
-      numbered && /^\d{1,7}$/.test(cell)
-        ? cell.length + 2
-        // A markdown link shows its label only; a PR or issue link also gets the dot and its space.
-        : pieces(cell.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label: string, href: string) => (GITHUB_ITEM.test(href) && !refsIn(label).length ? `${label}  ` : label)))
-            .reduce((n, p) => n + ('ref' in p ? p.ref.label.length + 2 : p.text.replace(/\*\*|`/g, '').length), 0)
+    // Atoms into lines of at most `width` cells. A plain word longer than a line is cut, so no line
+    // pushes the table's bars out of place.
+    const wrap = (list: Atom[], width: number): Atom[][] => {
+      const lines: Atom[][] = [[]]
+      let used = 0
+      for (const a of list) {
+        let atom = a
+        while (true) {
+          if (used > 0 && used + inner(atom) > width) {
+            lines.push([])
+            used = 0
+          }
+          if (atom.text !== undefined && inner(atom) > width - used) {
+            const head = atom.text.slice(0, width - used)
+            lines[lines.length - 1]!.push(word(head, atom.style ?? {}, atom.color))
+            lines.push([])
+            used = 0
+            atom = word(atom.text.slice(head.length), atom.style ?? {}, atom.color)
+            if (!atom.text!.trim()) break
+            continue
+          }
+          lines[lines.length - 1]!.push(atom)
+          used += atom.w
+          break
+        }
+      }
+      return lines.filter((l, i) => l.length || i === 0)
+    }
 
+    // Claude Code's own table grid, drawn around cells the mod lays out, so the references in them get
+    // their dot and card and the table keeps its borders.
     const table = (b: Extract<Block, { kind: 'table' }>) => {
       const count = b.header.length
-      const natural = b.header.map((h, c) => Math.max(h.length, ...b.rows.map((r) => width(r[c] ?? '', b.numbered[c]!))))
-      const room = columns - 2 * (count - 1)
-      const widths = [...natural]
-      // Shrink the widest column until the table fits; its cells wrap.
+      const head = b.header.map((h) => atoms(h, { bold: true }))
+      const body = b.rows.map((r) => b.header.map((_, c) => {
+        const text = r[c] ?? ''
+        return b.numbered[c] && /^\d{1,7}$/.test(text) ? [element(reference({ repo: null, number: Number(text), label: text }), text.length + 2)] : atoms(text)
+      }))
+      const measure = (list: Atom[]) => list.reduce((n, a) => n + a.w, 0) - (list.length && list[list.length - 1]!.text?.endsWith(' ') ? 1 : 0)
+      const widths = b.header.map((_, c) => Math.max(1, measure(head[c]!), ...body.map((r) => measure(r[c]!))))
+      // `│ a │ b │`: three cells around each column plus the last bar.
+      const room = columns - (3 * count + 1)
       while (widths.reduce((a, w) => a + w, 0) > room) {
         const widest = widths.indexOf(Math.max(...widths))
         if (widths[widest]! <= 8) break
         widths[widest]!--
       }
-      const cell = (text: string, c: number, header: boolean) =>
-        Box({
-          width: widths[c], flexShrink: 0, flexDirection: 'row', flexWrap: 'wrap',
-          children: header ? [span(text, undefined, { bold: true })]
-            : b.numbered[c] && /^\d{1,7}$/.test(text) ? [reference({ repo: null, number: Number(text), label: text })]
-              : flow(text),
-        })
-      const total = widths.reduce((a, w) => a + w, 0) + 2 * (count - 1)
+      const rule = (left: string, mid: string, right: string) => span(left + widths.map((w) => '─'.repeat(w + 2)).join(mid) + right)
+      const rows = (cells: Atom[][], center: boolean): RenderElement[] => {
+        const wrapped = cells.map((list, c) => wrap(list, widths[c]!))
+        const height = Math.max(...wrapped.map((l) => l.length))
+        return Array.from({ length: height }, (_, k) =>
+          Box({
+            flexDirection: 'row',
+            children: [
+              span('│ '),
+              ...wrapped.flatMap((lines, c) => {
+                const line = lines[k] ?? []
+                const pad = Math.max(0, widths[c]! - measure(line))
+                const left = center ? Math.floor(pad / 2) : 0
+                return [
+                  Box({ width: widths[c], flexShrink: 0, flexDirection: 'row', children: [...(left ? [span(' '.repeat(left))] : []), ...line.map((a) => a.el)] }),
+                  span(c < count - 1 ? ' │ ' : ' │'),
+                ]
+              }),
+            ],
+          }))
+      }
       return Box({
         flexDirection: 'column',
         children: [
-          Box({ flexDirection: 'row', columnGap: 2, children: b.header.map((h, c) => cell(h, c, true)) }),
-          span('─'.repeat(total), C.dim),
-          ...b.rows.map((r) => Box({ flexDirection: 'row', columnGap: 2, children: b.header.map((_, c) => cell(r[c] ?? '', c, false)) })),
+          rule('┌', '┬', '┐'),
+          ...rows(head, true),
+          ...body.flatMap((r) => [rule('├', '┼', '┤'), ...rows(r, false)]),
+          rule('└', '┴', '┘'),
         ],
       })
     }

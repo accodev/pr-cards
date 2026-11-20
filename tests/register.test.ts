@@ -59,7 +59,6 @@ test('draws references in text and in a numbers column with a dot, a link and th
   expect(links).toContain(`${PR.url}/files`)
   expect(links).toContain(`${PR.url}/checks`)
   expect(links).toContain('https://github.com/acme/pos-api/actions/runs/7/job/9') // the failing check's run
-  expect(await ui.find({ type: 'Text', text: 'ctrl+click opens a link' })).toBeDefined()
   // References inside a title are links too: same repo, then another repo.
   expect(links).toContain('https://github.com/acme/pos-api/issues/1250')
   expect(links).toContain('https://github.com/other/lib/issues/3')
@@ -103,6 +102,24 @@ test('keeps bold, italic and code around a reference inside them', async ($, on)
   expect(style('validate/stage.md')).toMatchObject({ color: 'ansi256(6)' })
   expect(style('also ')).toMatchObject({ italic: true })
   expect(await ui.findAll({ type: 'Markdown', text: '[#1319](https://github.com/acme/pos-api/pull/1319)' })).toHaveLength(2)
+})
+
+test('draws a table with references inside Claude Code borders, wrapping long cells', async ($, on) => {
+  const clock = mock.clock(on)
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR, n1250: ISSUE } } }))))
+  const long = 'a title long enough to wrap over several lines in a narrow terminal for sure (#1250)'
+  const ui = await $.ui.mount({ ...message(`| # | Title |\n|---|---|\n| 1319 | ${long} |`), viewport: { columns: 40, rows: 40 } })
+  await clock.settle()
+  await clock.settle()
+  const texts = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
+  expect(texts.filter((t) => t.startsWith('┌'))).toHaveLength(1)
+  expect(texts.filter((t) => t.startsWith('├'))).toHaveLength(1)
+  expect(texts.filter((t) => t.startsWith('└'))).toHaveLength(1)
+  expect(texts.find((t) => t.startsWith('┌'))!.length).toBeLessThanOrEqual(38) // 40 columns less the reply's indent
+  // The title wraps: one left bar per drawn line, the header line and at least three title lines.
+  expect(texts.filter((t) => t === '│ ').length).toBeGreaterThanOrEqual(4)
+  expect(await ui.find({ type: 'Markdown', text: '[#1250](https://github.com/acme/pos-api/issues/1250)' })).toBeDefined()
+  expect(texts.some((t) => t.includes('ctrl+click'))).toBe(false) // the card has no hint row
 })
 
 test('treats a markdown link to a PR or issue as a reference, in text and in a table', async ($, on) => {
