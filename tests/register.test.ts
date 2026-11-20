@@ -157,22 +157,27 @@ test('leaves row numbers and numbers GitHub does not know as plain text', async 
   expect(texts.filter((t) => t.startsWith('✖'))).toHaveLength(1)
 })
 
-test('draws the one-row card when cardStyle is row', { options: { cardStyle: 'row' } }, async ($, on) => {
+test('draws the GitHub-style card when cardStyle is github', { options: { cardStyle: 'github' } }, async ($, on) => {
   const clock = mock.clock(on)
-  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR } } }))))
+  const pr = { ...PR, headRefName: 'fix/vat', baseRefName: 'main' }
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: pr } } }))))
   const ui = await $.ui.mount(message('See #1319.'))
   await clock.settle()
   await clock.settle()
   const texts = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
-  // One row: state word, title, author, checks with the failing count's color, the review that asks for changes.
-  expect(texts).toContain('⬤ open  ')
+  // The repo and the day it was opened, the title and number, the branches, then the review and checks.
+  expect(texts).toContain('acme/pos-api')
+  expect(texts.some((t) => /^ on [A-Z][a-z]{2} \d{1,2}$/.test(t))).toBe(true)
   expect(texts).toContain('fix: round VAT per line')
-  expect(texts).toContain('✖ 1/2')
-  expect(texts).toContain('you')
-  // None of the full card's rows.
-  expect(texts.some((t) => t === ' Open ' || t.includes('open review thread') || t.includes('approved by'))).toBe(false)
+  expect(texts).toContain('#1319')
+  expect(texts).toContain('fix/vat')
+  expect(texts).toContain('main')
+  expect(texts).toContain('● changes requested by you')
+  expect(texts).toContain('✖ 1 of 2 checks')
+  // None of the full card's badge, size or thread rows.
+  expect(texts.some((t) => t === ' Open ' || t.includes('open review thread') || t.includes('files'))).toBe(false)
   const links = (await ui.findAll({ type: 'Link' })).map((l) => l.props.href)
-  expect(links).toEqual(expect.arrayContaining([PR.url, 'https://github.com/lgreen', `${PR.url}/checks`]))
+  expect(links).toEqual(expect.arrayContaining(['https://github.com/acme/pos-api', PR.url, 'https://github.com/acme/pos-api/tree/fix/vat', `${PR.url}/checks`]))
 })
 
 test('leaves a message without references to Claude Code', async ($, on) => {
