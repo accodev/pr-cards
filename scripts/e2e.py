@@ -127,14 +127,16 @@ try:
         targets = set(m.decode("utf-8", "replace") for m in re.findall(rb"\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]+)", bytes(raw)))
         author_link = "https://github.com/danielscainifiskaltrust" in targets
         pr_link = "https://github.com/fiskaltrust/market-it/pull/1306" in targets
-    print("author link:", author_link, "pr link:", pr_link, "footer:", "ctrl+click opens a link" in text())
+    no_hint = "ctrl+click" not in text()
+    print("author link:", author_link, "pr link:", pr_link, "no hint row:", no_hint)
+    pr_link = pr_link and no_hint
     # The author is drawn without a solid underline, so the terminal's dotted hyperlink underline shows.
     at = find("@danielscainifiskaltrust")
     with lock:
         solid = at is not None and screen.buffer[at[1] - 1][at[0] - 1].underscore
     print("author solid underline:", solid)
     author_link = author_link and at is not None and not solid
-    hovered = hovered and author_link and pr_link and "ctrl+click opens a link" in text()
+    hovered = hovered and author_link and pr_link
     proc.write(f"\x1b[<35;{x};{min(ROWS, y + 3)}M")  # the pointer leaves
     time.sleep(1)
     proc.write(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m")  # a plain click
@@ -161,6 +163,16 @@ try:
     crashed = "crashed" in text()
     print("list dots:", len(dots), "loading:", pending, "failed:", failed, "crashed:", crashed)
     clicked = clicked and not crashed and len(dots) >= 15 and not pending and not failed
+    # The table keeps Claude Code's borders: every line from ┌ to └ starts and ends on the same columns.
+    lines = text().split("\n")
+    top = next((i for i, l in enumerate(lines) if "┌" in l), None)
+    bottom = next((i for i, l in enumerate(lines) if "└" in l and top is not None and i > top), None)
+    aligned = False
+    if top is not None and bottom is not None:
+        left, right = lines[top].index("┌"), lines[top].rindex("┐")
+        aligned = all(lines[i][left] in "│├└" and lines[i][right] in "│┤┘" for i in range(top + 1, bottom + 1))
+    print("table borders:", top is not None and bottom is not None, "aligned:", aligned)
+    clicked = clicked and aligned
     row = find("⬤ 1320")
     if row:
         proc.write(f"\x1b[<35;{row[0] + 3};{row[1]}M")
