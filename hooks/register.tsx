@@ -43,6 +43,9 @@ const STATE_WORD: Record<string, string> = { OPEN: 'Open', DRAFT: 'Draft', MERGE
 const REVIEW_WORD: Record<string, string> = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes requested', REVIEW_REQUIRED: 'review required' }
 const DOT = '⬤'
 const CARD_WIDTH = 66
+// The one-row card: at most this many cells wide, on a fill fainter than the full card's.
+const ROW_MAX = 96
+const ROW_BG = 'ansi256(235)'
 
 const cache = new Map<string, Entry>()
 const expanded = new Set<string>()
@@ -307,7 +310,9 @@ const short = (url: string) => url.replace(/^https:\/\//, '')
 
 // ---------- Drawing ----------
 
-export const register: Register = (on) => {
+export const register: Register = (on, options) => {
+  // `card` (the default) or `row`, from the plugin's settings.
+  const style = String(options.cardStyle ?? 'card').trim().toLowerCase() === 'row' ? 'row' : 'card'
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const parsed = blocks(e.props.text)
     const refs = parsed.flatMap(blockRefs)
@@ -379,19 +384,15 @@ export const register: Register = (on) => {
       }, []))
       return merged.map((row) => {
         const width = row.reduce((n, s) => n + s.text.length, 0)
-        return Text({
-          backgroundColor: BG,
-          children: [
-            '  ',
-            ...row.map((s) => {
-              const run = Text({ color: s.color, bold: s.bold, underline: s.underline, backgroundColor: s.backgroundColor ?? BG, children: [s.text] })
-              return s.href ? Link({ href: s.href, children: [run] }) : run
-            }),
-            ' '.repeat(Math.max(0, INNER - width) + 2),
-          ],
-        })
+        return Text({ backgroundColor: BG, children: ['  ', ...runs(row, BG), ' '.repeat(Math.max(0, INNER - width) + 2)] })
       })
     }
+    // Each run as Text on the fill, and as a Link around it when it has a target.
+    const runs = (row: Seg[], bg: string) =>
+      row.map((s) => {
+        const run = Text({ color: s.color, bold: s.bold, underline: s.underline, backgroundColor: s.backgroundColor ?? bg, children: [s.text] })
+        return s.href ? Link({ href: s.href, children: [run] }) : run
+      })
     // The fill is the card's edge. A box-drawing line runs through the middle of its cell, so a border
     // cell either leaves a dark half inside the line or a gray half outside it.
     const edge = () => Text({ backgroundColor: BG, children: [' '.repeat(CARD_WIDTH)] })
@@ -436,6 +437,29 @@ export const register: Register = (on) => {
         [seg(short(item.url), C.link, { href: item.url })],
       ])
 
+    // `cardStyle: row`: the whole card on one faint row, as design 7: state, title, author, checks, review.
+    const rowCard = (item: Item) => {
+      const tail: Seg[] = [seg('  '), person(item.author)]
+      if (item.kind === 'issue') tail.push(seg(' · ', C.dim), linked(`${item.comments} comments`, item.url, C.dim))
+      const c = item.checks
+      if (c?.total) {
+        tail.push(seg(' · ', C.dim), c.failed ? linked(`✖ ${c.ok}/${c.total}`, `${item.url}/checks`, C.closed) : linked(`✔ ${c.ok}/${c.total}`, `${item.url}/checks`, C.open))
+      }
+      if (item.changesBy?.length) tail.push(seg(' · ', C.dim), seg('● ', C.warn), ...people(item.changesBy, C.warn))
+      else if (item.approvedBy?.length) tail.push(seg(' · ', C.dim), seg('✔ ', C.open), ...people(item.approvedBy, C.open))
+      const head = `${DOT} ${(STATE_WORD[item.state] ?? item.state).toLowerCase()}  `
+      const used = head.length + tail.reduce((n, s) => n + s.text.length, 0)
+      // The title gives way so the row stays within ROW_MAX cells; it keeps at least 20.
+      const room = Math.max(20, ROW_MAX - 2 - used)
+      const title = item.title.length > room ? `${item.title.slice(0, room - 1)}…` : item.title
+      const row: Seg[] = [seg(head, color(item)), { text: title, bold: true, href: item.url }, ...tail]
+      const width = row.reduce((n, s) => n + s.text.length, 0) + 2
+      return Box({
+        position: 'absolute', bottom: 1, left: 0, display: 'none', hover: { display: 'flex' }, width,
+        children: [Text({ backgroundColor: ROW_BG, children: [' ', ...runs(row, ROW_BG), ' '] })],
+      })
+    }
+
     // A reference where the text has it: the state dot, the number as a link, the card on hover.
     const reference = (ref: Ref) => {
       const entry = entryOf(ref)
@@ -447,7 +471,7 @@ export const register: Register = (on) => {
       const label = item
         ? Markdown({ key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})`, pressableLinks: [item.url], onLinkPress: (link) => toggle(link.href) })
         : span(ref.label, C.link, { underline: true })
-      const pop = item ? [card(item)] : entry?.error ? [popup([[seg(entry.error, C.closed)]])] : []
+      const pop = item ? [style === 'row' ? rowCard(item) : card(item)] : entry?.error ? [popup([[seg(entry.error, C.closed)]])] : []
       return Box({ key: `${id}-ref-${serial++}`, flexShrink: 0, children: [dot, label, ...pop] })
     }
 

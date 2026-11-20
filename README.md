@@ -26,6 +26,19 @@ claude plugin install pr-cards@pr-cards
 
 Then run `/reload-plugins` in a running session, or start a new one. Remove it with `claude plugin uninstall pr-cards@pr-cards`.
 
+## Settings
+
+`cardStyle` picks the hover card: `card` (the default) or `row`.
+
+- `card` draws the full card: state, title, author, size, checks, reviews and threads.
+- `row` draws one faint row: state, title, author, checks and the review.
+
+Set it in `/plugin`, or from the shell:
+
+```sh
+echo '{"cardStyle": "row"}' | claude plugin configure pr-cards@pr-cards --values-stdin
+```
+
 ## Develop
 
 ```sh
