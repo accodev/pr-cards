@@ -172,12 +172,26 @@ test('draws the GitHub-style card when cardStyle is github', { options: { cardSt
   expect(texts).toContain('#1319')
   expect(texts).toContain('fix/vat')
   expect(texts).toContain('main')
-  expect(texts).toContain('● changes requested by you')
+  expect(texts).toContain('opened by ') // the footer opens with the author, as design 9c
+  expect(texts).toContain('@lgreen')
+  expect(texts).toContain('● you requested changes')
   expect(texts).toContain('✖ 1 of 2 checks')
   // None of the full card's badge, size or thread rows.
   expect(texts.some((t) => t === ' Open ' || t.includes('open review thread') || t.includes('files'))).toBe(false)
   const links = (await ui.findAll({ type: 'Link' })).map((l) => l.props.href)
-  expect(links).toEqual(expect.arrayContaining(['https://github.com/acme/pos-api', PR.url, 'https://github.com/acme/pos-api/tree/fix/vat', `${PR.url}/checks`]))
+  expect(links).toEqual(expect.arrayContaining(['https://github.com/acme/pos-api', PR.url, 'https://github.com/acme/pos-api/tree/fix/vat', `${PR.url}/checks`, 'https://github.com/lgreen']))
+})
+
+test('moves the checks to their own row when a long login fills the GitHub-style footer', { options: { cardStyle: 'github' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const pr = { ...PR, author: { login: 'danielscainifiskaltrust-long' }, latestReviews: { nodes: [{ state: 'APPROVED', author: { login: 'me' } }] } }
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: pr } } }))))
+  const ui = await $.ui.mount(message('See #1319.'))
+  await clock.settle()
+  await clock.settle()
+  const texts = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
+  expect(texts).toContain('✔ you approved')
+  expect(texts).toContain('✖ 1 of 2 checks') // whole, on its own row
 })
 
 test('leaves a message without references to Claude Code', async ($, on) => {
