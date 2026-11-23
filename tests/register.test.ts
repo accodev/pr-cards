@@ -215,24 +215,32 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   } as const
   const band = await $.ui.mount(bandInput as never)
   await clock.settle()
-  // The click tracked #1319 and selected it: its chip and its action bar show.
+  // The click tracked #1319 and selected it: its chip and the hotkey row show.
   expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
-  expect(await band.find({ type: 'Text', text: 'selected ·' })).toBeDefined()
-  // The failing check's run (…/actions/runs/7) is re-run, failed jobs only.
-  await band.press({ key: 'pr-cards-rerun' })
+  const hotkeys = (await band.findAll({ type: 'Button' })).flatMap((b) => (b.props.hotkey ? [`${b.props.hotkey}: ${b.props.label}`] : []))
+  // c: check out shows because the PR is in the session's own repo.
+  expect(hotkeys).toEqual(['a: approve', 'r: request changes', 'f: re-run failed', 'c: check out', 'o: open', 'x: remove'])
+
+  // f: the failing check's run (…/actions/runs/7) is re-run, failed jobs only.
+  await band.press({ key: 'pr-cards-f' })
   await clock.settle()
   expect(runs).toContainEqual(['gh', 'run', 'rerun', '7', '--failed', '--repo', 'acme/pos-api'])
 
-  // Approving takes two presses; only the second runs gh.
-  await band.press({ key: 'pr-cards-approve' })
+  // a: approving takes two presses; only the second runs gh.
+  await band.press({ key: 'pr-cards-a' })
   expect(runs.some((r) => r[1] === 'pr' && r[2] === 'review')).toBe(false)
-  expect(await band.find({ type: 'Text', text: ' ✔ press again to approve ' })).toBeDefined()
-  await band.press({ key: 'pr-cards-approve' })
+  expect((await band.find({ key: 'pr-cards-a' }))?.props.label).toBe('press a again to approve')
+  await band.press({ key: 'pr-cards-a' })
   await clock.settle()
   expect(runs).toContainEqual(['gh', 'pr', 'review', '1319', '--repo', 'acme/pos-api', '--approve'])
 
-  // × removes it, and the band goes away with the last chip.
-  await band.press({ key: 'pr-cards-untrack-acme/pos-api#1319' })
+  // o opens it in the browser through gh.
+  await band.press({ key: 'pr-cards-o' })
+  await clock.settle()
+  expect(runs).toContainEqual(['gh', 'pr', 'view', '1319', '--repo', 'acme/pos-api', '--web'])
+
+  // x removes it, and the band goes away with the last chip.
+  await band.press({ key: 'pr-cards-x' })
   await clock.settle()
   expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeUndefined()
 })

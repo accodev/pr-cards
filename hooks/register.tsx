@@ -708,8 +708,22 @@ export const register: Register = (on, options) => {
     return Box({ flexDirection: 'column', rowGap: 1, children: parsed.map(draw) })
   })
 
-  // Design B2c: the tracked PRs as chips above the prompt, `perRow` to a row, and one action bar
-  // for the selected chip, so the chip rows never move when the selection changes.
+  // Arrows (and a click) move the band's focus ring between chips: the focused chip is the selected one.
+  on('ui.focus', ($, e, next) => {
+    const prefix = 'pr-cards-select-'
+    if (band && e.plugin === 'pr-cards' && e.element?.startsWith(prefix)) {
+      const key = e.element.slice(prefix.length)
+      if (selected !== key) {
+        selected = key
+        armed = null
+        $.ui.invalidate('ui.render')
+      }
+    }
+    return next(e)
+  })
+
+  // Design B2e: the tracked PRs as chips above the prompt, `perRow` to a row, driven by the
+  // keyboard: arrows move between chips, one key runs an action on the focused one.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const theirs = await next(e)
     if (!band) return theirs
@@ -747,50 +761,51 @@ export const register: Register = (on, options) => {
       return Box({
         key: `pr-cards-chip-${key}`, flexDirection: 'row', flexShrink: 0,
         children: [
-          Button({ key: `pr-cards-select-${key}`, label: `select #${t.number}`, plain: true, onPress: () => { selected = selected === key ? null : key; armed = null; $.ui.invalidate('ui.render') }, children: runs.map((r) => Text({ color: r.color, bold: r.bold, backgroundColor: bg, children: [r.text] })) }),
-          Button({ key: `pr-cards-untrack-${key}`, label: `remove #${t.number}`, plain: true, onPress: () => untrack($, key), children: [Text({ color: C.dim, backgroundColor: bg, children: ['× '] })] }),
+          // One focus stop per chip, so ← → step chip by chip; the × marks what x removes.
+          Button({
+            key: `pr-cards-select-${key}`, label: `select #${t.number}`, plain: true,
+            onPress: () => { selected = key; armed = null; $.ui.invalidate('ui.render') },
+            children: [...runs, { text: '× ', color: C.dim }].map((r) => Text({ color: r.color, bold: r.bold, backgroundColor: bg, children: [r.text] })),
+          }),
         ],
       })
     }
 
-    const action = (key: string, label: string, bg: string, fg: string | undefined, onPress: () => unknown) =>
-      Button({ key, label, plain: true, onPress, children: [Text({ color: fg, backgroundColor: bg, children: [` ${label} `] })] })
-    const linkAction = (label: string, href: string, bg: string, fg?: string) => Link({ href, children: [Text({ color: fg, backgroundColor: bg, children: [` ${label} `] })] })
+    // A hotkey button drawn plain: the key in the accent color, then its label (`a: approve`).
+    const hotkey = (letter: string, label: string, onPress: () => unknown) => Button({ key: `pr-cards-${letter}`, hotkey: letter, label, plain: true, onPress })
 
     const picked = tracked.find((t) => keyFor(t.repo, t.number) === selected)
     const item = picked ? cache.get(keyFor(picked.repo, picked.number))?.item : undefined
-    let bar: RenderElement
-    if (!picked || !item) {
-      bar = Text({ color: C.dim, children: [`  tracked · click a chip for its actions · × removes it`] })
-    } else {
-      const key = keyFor(item.repo, item.number)
-      const isOpen = item.kind === 'pr' && (item.state === 'OPEN' || item.state === 'DRAFT')
-      const runIds = [...new Set((item.failing ?? []).flatMap((f) => /\/actions\/runs\/(\d+)/.exec(f.url ?? '')?.[1] ?? []))]
-      const refresh = () => { cache.delete(key); want($, { repo: item.repo, number: item.number, label: '' }) }
-      const buttons: RenderElement[] = []
-      if (isOpen && item.author !== viewer) {
-        buttons.push(action('pr-cards-approve', armed === key ? '✔ press again to approve' : '✔ approve', 'ansi256(22)', 'ansi256(15)', async () => {
-          if (armed !== key) { armed = key; $.ui.invalidate('ui.render'); return }
-          armed = null
-          await act($, ['gh', 'pr', 'review', String(item.number), '--repo', item.repo, '--approve'], `approved #${item.number}`)
-          refresh()
-        }))
-        buttons.push(linkAction('● request changes ↗', `${item.url}/files`, 'ansi256(58)', 'ansi256(11)'))
+    const keys: RenderElement[] = []
+    if (picked) {
+      const key = keyFor(picked.repo, picked.number)
+      if (item) {
+        const isOpen = item.kind === 'pr' && (item.state === 'OPEN' || item.state === 'DRAFT')
+        const runIds = [...new Set((item.failing ?? []).flatMap((f) => /\/actions\/runs\/(\d+)/.exec(f.url ?? '')?.[1] ?? []))]
+        const refresh = () => { cache.delete(key); want($, { repo: item.repo, number: item.number, label: '' }) }
+        const web = ['gh', item.kind === 'pr' ? 'pr' : 'issue', 'view', String(item.number), '--repo', item.repo, '--web']
+        if (isOpen && item.author !== viewer) {
+          keys.push(hotkey('a', armed === key ? 'press a again to approve' : 'approve', async () => {
+            if (armed !== key) { armed = key; $.ui.invalidate('ui.render'); return }
+            armed = null
+            await act($, ['gh', 'pr', 'review', String(item.number), '--repo', item.repo, '--approve'], `approved #${item.number}`)
+            refresh()
+          }))
+          // A review that asks for changes needs a comment: it opens the PR in the browser.
+          keys.push(hotkey('r', 'request changes', () => act($, web, `opened #${item.number} to request changes`)))
+        }
+        if (runIds.length) {
+          keys.push(hotkey('f', 're-run failed', async () => {
+            for (const run of runIds) await act($, ['gh', 'run', 'rerun', run, '--failed', '--repo', item.repo], `re-running the failed jobs of #${item.number}`)
+            refresh()
+          }))
+        }
+        if (isOpen && item.repo.toLowerCase() === (cwdRepo ?? '').toLowerCase()) {
+          keys.push(hotkey('c', 'check out', () => act($, ['gh', 'pr', 'checkout', String(item.number), '--repo', item.repo], `checked out #${item.number}`)))
+        }
+        keys.push(hotkey('o', 'open', () => act($, web, `opened #${item.number}`)))
       }
-      if (runIds.length) {
-        buttons.push(action('pr-cards-rerun', '↻ re-run failed', 'ansi256(238)', undefined, async () => {
-          for (const run of runIds) await act($, ['gh', 'run', 'rerun', run, '--failed', '--repo', item.repo], `re-running the failed jobs of #${item.number}`)
-          refresh()
-        }))
-      }
-      if (isOpen && item.repo.toLowerCase() === (cwdRepo ?? '').toLowerCase()) {
-        buttons.push(action('pr-cards-checkout', '⎇ check out', 'ansi256(238)', undefined, () => act($, ['gh', 'pr', 'checkout', String(item.number), '--repo', item.repo], `checked out #${item.number}`)))
-      }
-      buttons.push(linkAction('↗ open', item.url, 'ansi256(238)'))
-      bar = Box({
-        flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, paddingLeft: 2,
-        children: [Text({ color: C.link, bold: true, children: [`#${item.number}`] }), Text({ color: C.dim, children: ['selected ·'] }), ...buttons],
-      })
+      keys.push(hotkey('x', 'remove', () => untrack($, key)))
     }
 
     const fit = Math.max(1, Math.min(perRow, Math.floor((Math.max(20, e.props.bodyColumns) - 2) / (CHIP + 1))))
@@ -798,7 +813,9 @@ export const register: Register = (on, options) => {
     for (let i = 0; i < tracked.length; i += fit) {
       rows.push(Box({ flexDirection: 'row', columnGap: 1, paddingLeft: 2, children: tracked.slice(i, i + fit).map(chip) }))
     }
-    const ours = Box({ flexDirection: 'column', children: [bar, ...rows] })
+    const hint = Text({ color: C.dim, children: [picked ? '  tracked · ←→ move · ctrl+x tab focuses' : '  tracked · click a chip or ctrl+x tab, then ←→ and a key'] })
+    const keyRow = keys.length ? [Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 3, paddingLeft: 2, children: keys })] : []
+    const ours = Box({ flexDirection: 'column', children: [hint, ...rows, ...keyRow] })
     return theirs ? Box({ flexDirection: 'column', children: [ours, theirs] }) : ours
   })
 }
