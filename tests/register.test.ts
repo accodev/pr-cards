@@ -226,6 +226,10 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   await clock.settle()
   // The click tracked #1319 and selected it: its chip and the hotkey row show.
   expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
+  // Design H3b: no chip fill; the selected chip's bar is in the theme's suggestion color.
+  const bars = (await band.findAll({ type: 'Text' })).filter((t) => String(t.text).startsWith('▔'))
+  expect(bars.map((b) => [String(b.text).length, b.props.color])).toEqual([[31, 'suggestion']])
+  expect((await band.findAll({ type: 'Text' })).some((t) => t.props.backgroundColor)).toBe(false)
   const hotkeys = (await band.findAll({ type: 'Button' })).flatMap((b) => (b.props.hotkey ? [`${b.props.hotkey}: ${b.props.label}`] : []))
   expect(hotkeys).toEqual(['a: approve', 'r: request changes', 'f: re-run failed', 'o: open', 'c: copy link', 'x: remove'])
 
