@@ -142,25 +142,50 @@ try:
     proc.write(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m")  # a plain click
     time.sleep(2)
     dump("3-click")
-    # A plain click tracks the PR: a chip and the selected PR's action bar show above the prompt.
-    # The e2e never presses approve: that would approve a real PR.
-    bar = find("#1306 selected ·")
-    chip_x = None
-    if bar:
-        for row in range(bar[1], min(ROWS, bar[1] + 4)):
-            line = text().split("\n")[row]
-            if "#1306" in line and "×" in line:
-                chip_x = (line.index("×", line.index("#1306")) + 1, row + 1)
-                break
-    print("tracked chip and action bar:", bool(bar), chip_x)
-    clicked = bool(bar) and chip_x is not None and "crashed" not in text()
-    if chip_x:
-        proc.write(f"\x1b[<0;{chip_x[0]};{chip_x[1]}M\x1b[<0;{chip_x[0]};{chip_x[1]}m")  # × removes it
+    # A plain click tracks the PR: a chip above the prompt and the hotkey row of the selected one.
+    # The e2e never presses a, r, f or c: those act on a real PR.
+    def chip_at(number):
+        for row, line in enumerate(text().split("\n")):
+            if f"#{number}" in line and "×" in line and "tracked" not in line:
+                return line.index(f"#{number}") + 2, row + 1
+        return None
+
+    first = chip_at(1306)
+    keyrow = "x: remove" in text()
+    print("tracked chip and hotkey row:", first, keyrow)
+    clicked = first is not None and keyrow and "crashed" not in text()
+    # Track a second one, focus the band with a click on the first chip, → to the second, x removes it.
+    issue = find("⬤ #1250")
+    if clicked and issue:
+        proc.write(f"\x1b[<0;{issue[0] + 3};{issue[1]}M\x1b[<0;{issue[0] + 3};{issue[1]}m")
         time.sleep(2)
-        dump("3b-untracked")
-        gone = "selected ·" not in text()
-        print("× removed it:", gone)
-        clicked = clicked and gone
+        second = chip_at(1250)
+        first = chip_at(1306)
+        proc.write(f"\x1b[<0;{first[0]};{first[1]}M\x1b[<0;{first[0]};{first[1]}m")  # selects the first chip
+        time.sleep(1)
+        proc.write("\x18\t")  # ctrl+x tab: the band takes the keyboard
+        time.sleep(1)
+        dump("3a-focused")
+        proc.write("\x1b[C")  # →
+        time.sleep(1)
+        with lock:
+            moved = second is not None and screen.buffer[second[1] - 1][second[0] - 1].bg == "005f87"
+        dump("3b-arrow")
+        proc.write("x")
+        time.sleep(2)
+        dump("3c-removed")
+        gone = chip_at(1250) is None and chip_at(1306) is not None
+        print("→ selected the second chip:", moved, "x removed it:", gone)
+        clicked = clicked and moved and gone
+        # Leave nothing tracked: the first chip is still focused after the removal moves the ring.
+        first = chip_at(1306)
+        for _ in range(3):
+            if not (chip_at(1306) or chip_at(1250)):
+                break
+            proc.write("\x18\tx")  # ctrl+x tab, then x on whichever chip holds the focus
+            time.sleep(2)
+    else:
+        clicked = False
 
     # The real list: 15 PRs with long titles, the reply that once crashed the hooks worker.
     proc.write("/clear\r")
