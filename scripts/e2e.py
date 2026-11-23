@@ -163,19 +163,31 @@ try:
         first = chip_at(1306)
         proc.write(f"\x1b[<0;{first[0]};{first[1]}M\x1b[<0;{first[0]};{first[1]}m")  # selects the first chip
         time.sleep(1)
-        proc.write("\x18\t")  # ctrl+x tab: the band takes the keyboard
+        proc.write("\x18\t")  # ctrl+x then tab: the band takes the keyboard
         time.sleep(1)
         dump("3a-focused")
-        proc.write("\x1b[C")  # →
+
+        def picked():
+            with lock:
+                if second and screen.buffer[second[1] - 1][second[0] - 1].bg == "005f87":
+                    return 1250
+                if first and screen.buffer[first[1] - 1][first[0] - 1].bg == "005f87":
+                    return 1306
+            return None
+
+        before = picked()
+        proc.write("\x1b[B")  # ↓ moves to the next control
         time.sleep(1)
-        with lock:
-            moved = second is not None and screen.buffer[second[1] - 1][second[0] - 1].bg == "005f87"
+        after = picked()
         dump("3b-arrow")
+        print("focused after ctrl+x tab:", before, "after ↓:", after)
+        moved = before is not None and after is not None and before != after
         proc.write("x")
         time.sleep(2)
         dump("3c-removed")
-        gone = chip_at(1250) is None and chip_at(1306) is not None
-        print("→ selected the second chip:", moved, "x removed it:", gone)
+        # x removes the chip ↓ moved to.
+        gone = after is not None and chip_at(after) is None and chip_at(1306 if after == 1250 else 1250) is not None
+        print("↓ moved the selection:", moved, "x removed it:", gone)
         clicked = clicked and moved and gone
         # Leave nothing tracked: the first chip is still focused after the removal moves the ring.
         first = chip_at(1306)
