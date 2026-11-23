@@ -178,6 +178,52 @@ async function copyLink($: EngineInterface, item: Item, surface: RenderSurface) 
   $.ui.toast(`copied ${label} as plain text`)
 }
 
+// The chord that focuses the band is the person's to rebind (`abovePrompt:focus` in keybindings.json),
+// and the mod API has no call that tells it: the hint reads the file itself, again at most every 30 s.
+const FOCUS_DEFAULT = 'ctrl+x tab'
+let focusChord: string | null = FOCUS_DEFAULT
+let focusReadAt = -Infinity
+let focusReading = false
+
+function focusChordFrom(json: string): string | null {
+  const chords = [FOCUS_DEFAULT]
+  let file: unknown
+  try { file = JSON.parse(json) } catch { return FOCUS_DEFAULT }
+  const blocks = (file as { bindings?: unknown })?.bindings
+  if (!Array.isArray(blocks)) return FOCUS_DEFAULT
+  for (const b of blocks as { context?: unknown; bindings?: Record<string, unknown> }[]) {
+    if (b?.context !== 'Chat' || !b.bindings || typeof b.bindings !== 'object') continue
+    for (const [chord, action] of Object.entries(b.bindings)) {
+      // A user binding of the same keys replaces the default's action; null unbinds it.
+      const at = chords.indexOf(chord)
+      if (at >= 0) chords.splice(at, 1)
+      if (action === 'abovePrompt:focus') chords.push(chord)
+    }
+  }
+  return chords.length ? chords[chords.length - 1] ?? null : null
+}
+
+const describeChord = (chord: string) => chord.trim().split(/\s+/).join(' then ')
+
+async function refreshFocusChord($: EngineInterface) {
+  if (focusReading || Date.now() - focusReadAt < 30_000) return
+  focusReading = true
+  try {
+    const dir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${(await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? ''}/.claude`
+    const text = await $.fs.read(`${dir}/keybindings.json`).catch(() => '')
+    const chord = typeof text === 'string' && text ? focusChordFrom(text) : FOCUS_DEFAULT
+    if (chord !== focusChord) {
+      focusChord = chord
+      $.ui.invalidate('ui.render')
+    }
+  } catch {
+    // No environment or file access here: the default chord stays in the hint.
+  } finally {
+    focusReadAt = Date.now()
+    focusReading = false
+  }
+}
+
 async function act($: EngineInterface, argv: string[], done: string) {
   try {
     const out = await $.process.run(argv, { timeoutMs: 60_000 })
@@ -888,9 +934,15 @@ export const register: Register = (on, options) => {
     for (let i = 0; i < tracked.length; i += fit) {
       rows.push(Box({ flexDirection: 'row', columnGap: 1, paddingLeft: 2, children: tracked.slice(i, i + fit).map(chip) }))
     }
-    // The keys the engine gives a band: ctrl+x then tab takes the keyboard, ↑↓ and tab move between
+    // The keys the engine gives a band: the focus chord takes the keyboard, ↑↓ and tab move between
     // controls, esc gives it back. ←→ do nothing here, and a mod cannot bind them.
-    const hint = Text({ color: C.dim, children: ['  tracked · click a key below, or ctrl+x then tab for the keys · ↑↓ move · esc back'] })
+    void refreshFocusChord($)
+    const hint = Text({
+      color: C.dim,
+      children: [focusChord
+        ? `  tracked · click a key below, or ${describeChord(focusChord)} for the keys · ↑↓ move · esc back`
+        : '  tracked · click a key below'],
+    })
     const keyRow = keys.length ? [Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 3, paddingLeft: 2, children: keys })] : []
     const ours = Box({ flexDirection: 'column', children: [hint, ...rows, ...keyRow] })
     return theirs ? Box({ flexDirection: 'column', children: [ours, theirs] }) : ours
