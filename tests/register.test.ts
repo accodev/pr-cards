@@ -244,6 +244,48 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeUndefined()
 })
 
+test('keeps tracked PRs per session: another session\'s list stays out of this band', async ($, on) => {
+  const clock = mock.clock(on)
+  const day = 86_400_000
+  // The store as a plain object, so the test can read back what the mod wrote.
+  const store: Record<string, unknown> = {
+    tracked: [{ repo: 'acme/pos-api', number: 1 }], // the one list 0.4 and 0.5 shared
+    'tracked.other': { at: Date.now() - day, items: [{ repo: 'acme/pos-api', number: 1250 }] },
+    'tracked.old': { at: Date.now() - 30 * day, items: [{ repo: 'acme/pos-api', number: 2 }] },
+  }
+  on('store.get', ($, e) => ({ value: store[e.key] }) as never)
+  on('store.set', ($, e) => ((store[e.key] = e.value), { value: undefined }) as never)
+  on('store.delete', ($, e) => (delete store[e.key], { value: undefined }) as never)
+  on('store.keys', () => ({ value: Object.keys(store) }) as never)
+  on('session.id', () => ({ value: 'session-a' }))
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR, n1250: ISSUE } } }))))
+  const bandInput = {
+    plugin: 'pr-cards', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
+    viewport: { columns: 120, rows: 40 },
+    props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 115 },
+  } as const
+  const band = await $.ui.mount(bandInput as never)
+  await clock.settle()
+  // Nothing of the other session, nor of the old shared list.
+  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1250' })).toBeUndefined()
+  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1' })).toBeUndefined()
+
+  const reply = await $.ui.mount(message('See #1319.'))
+  await clock.settle()
+  await clock.settle()
+  const link = await reply.find({ type: 'Markdown', text: '[#1319](https://github.com/acme/pos-api/pull/1319)' })
+  await reply.press({ key: String(link?.props.key), link: { href: PR.url } })
+  await clock.settle()
+  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
+  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1250' })).toBeUndefined()
+
+  // Saved under this session; the shared list and the idle session's list are gone, the recent one stays.
+  expect((store['tracked.session-a'] as { items: unknown[] }).items).toEqual([{ repo: 'acme/pos-api', number: 1319 }])
+  expect(store.tracked).toBeUndefined()
+  expect(store['tracked.old']).toBeUndefined()
+  expect(store['tracked.other']).toBeDefined()
+})
+
 test('leaves a message without references to Claude Code', async ($, on) => {
   on('process.run', () => {
     throw new Error('gh must not run')
