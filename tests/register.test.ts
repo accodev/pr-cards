@@ -226,10 +226,14 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   await clock.settle()
   // The click tracked #1319 and selected it: its chip and the hotkey row show.
   expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
-  // Design H3b: no chip fill; the selected chip's bar is in the theme's suggestion color.
-  const bars = (await band.findAll({ type: 'Text' })).filter((t) => String(t.text).startsWith('▔'))
-  expect(bars.map((b) => [String(b.text).length, b.props.color])).toEqual([[31, 'suggestion']])
-  expect((await band.findAll({ type: 'Text' })).some((t) => t.props.backgroundColor)).toBe(false)
+  // Design U2 with W1: the selected chip underlined in the theme's suggestion color, two chips wide
+  // (65 cells and the gap), so the whole title fits; no fills and no bar row.
+  const texts = await band.findAll({ type: 'Text' })
+  const lined = texts.filter((t) => t.props.underline)
+  expect(new Set(lined.map((t) => t.props.color))).toEqual(new Set(['suggestion']))
+  expect(lined.map((t) => String(t.text)).join('')).toHaveLength(63) // then a space and the gap, as two chips take
+  expect(lined.map((t) => String(t.text)).join('')).toContain('#1319 fix: round VAT per line')
+  expect(texts.some((t) => t.props.backgroundColor || String(t.text).includes('▔'))).toBe(false)
   const hotkeys = (await band.findAll({ type: 'Button' })).flatMap((b) => (b.props.hotkey ? [`${b.props.hotkey}: ${b.props.label}`] : []))
   expect(hotkeys).toEqual(['a: approve', 'r: request changes', 'f: re-run failed', 'o: open', 'c: copy link', 'x: remove'])
 
