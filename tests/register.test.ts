@@ -63,11 +63,9 @@ test('draws references in text and in a numbers column with a dot, a link and th
   expect(links).toContain('https://github.com/acme/pos-api/issues/1250')
   expect(links).toContain('https://github.com/other/lib/issues/3')
 
-  expect(await ui.find({ type: 'Text', text: 'OPEN THREADS 1' })).toBeUndefined()
+  // A click on a reference opens nothing in the transcript: the links carry no press handler.
   const link = await ui.find({ type: 'Markdown', text: '[#1319](https://github.com/acme/pos-api/pull/1319)' })
-  await ui.press({ key: String(link?.props.key), link: { href: PR.url } })
-  await clock.settle()
-  expect(await ui.find({ type: 'Text', text: 'OPEN THREADS 1' })).toBeDefined()
+  expect(link?.props.pressableLinks).toBeUndefined()
 })
 
 test('wraps a card row whose word fills the row exactly', async ($, on) => {

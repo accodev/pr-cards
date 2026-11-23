@@ -142,8 +142,9 @@ try:
     proc.write(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m")  # a plain click
     time.sleep(2)
     dump("3-click")
-    clicked = "CHECKS" in text() and "FILES" in text()
-    print("panel:", clicked)
+    # A plain click opens no panel in the transcript any more.
+    clicked = "CHECKS" not in text() and "crashed" not in text()
+    print("click opens no panel:", clicked)
 
     # The real list: 15 PRs with long titles, the reply that once crashed the hooks worker.
     proc.write("/clear\r")
