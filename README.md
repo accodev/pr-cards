@@ -7,7 +7,6 @@ A Claude Code mod that turns GitHub pull request and issue references in Claude'
 - `#1234`, `owner/repo#1234`, GitHub URLs and the numbers in a table column headed `#`, `PR` or `Issue` get a dot in the state's color: green open, gray draft, purple merged, red closed.
 - Hovering a reference opens a card: state, title, author, age, size, checks, reviews and open threads.
 - Every reference in the card is a link: repo, title references, author, reviewers, files, checks and the failing check's run. Ctrl+click opens it.
-- A plain click on a reference opens a panel under the reply with the checks, reviews, threads and files.
 
 The details come from one `gh api graphql` call per repo, cached for 60 seconds.
 
@@ -15,7 +14,7 @@ The details come from one `gh api graphql` call per repo, cached for 60 seconds.
 
 - Claude Code 2.1.327 or later, the version the mod is tested on.
 - The GitHub CLI, `gh`, signed in to an account that can read the repos.
-- Fullscreen rendering for hover and click: run `/tui fullscreen` once, or start Claude Code with `CLAUDE_CODE_NO_FLICKER=1`. Without it the dots and links show, and cards do not open.
+- Fullscreen rendering for the hover card: run `/tui fullscreen` once, or start Claude Code with `CLAUDE_CODE_NO_FLICKER=1`. Without it the dots and links show, and cards do not open.
 
 ## Install
 

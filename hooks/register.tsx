@@ -57,7 +57,6 @@ const day = (iso?: string) => {
 }
 
 const cache = new Map<string, Entry>()
-const expanded = new Set<string>()
 // The session folder's GitHub repo: undefined until asked, null when it has none.
 let cwdRepo: string | null | undefined
 let cwdRepoAsked = false
@@ -315,7 +314,6 @@ function toItem(repo: string, raw: Raw): Item {
 }
 
 const color = (item: Item) => STATE_COLOR[item.state] ?? C.dim
-const who = (login: string) => (login === viewer ? 'you' : `@${login}`)
 const short = (url: string) => url.replace(/^https:\/\//, '')
 
 // ---------- Drawing ----------
@@ -335,10 +333,7 @@ export const register: Register = (on, options) => {
     const columns = Math.max(20, (e.viewport?.columns ?? 100) - 2)
     let serial = 0
 
-    type Part = string | RenderElement
-    const line = (children: Part[], c?: string) => Text({ color: c, children })
     const span = (text: string, c?: string, extra: { bold?: boolean; italic?: boolean; underline?: boolean; backgroundColor?: string } = {}) => Text({ color: c, ...extra, children: [text] })
-    const badge = (item: Item) => span(` ${STATE_WORD[item.state] ?? item.state} `, 'ansi256(0)', { backgroundColor: color(item), bold: true })
 
     // A card is drawn as text rows padded to its full width: a Box background paints only the cells
     // that hold text, so the transcript under a short row would show through.
@@ -485,7 +480,7 @@ export const register: Register = (on, options) => {
       // A gray filled dot is a draft; loading is hollow and a failed lookup a cross, so neither reads as a state.
       const dot = item ? span(`${DOT} `, color(item)) : entry?.error ? span('✖ ', C.closed) : span('○ ', C.dim)
       const label = item
-        ? Markdown({ key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})`, pressableLinks: [item.url], onLinkPress: (link) => toggle(link.href) })
+        ? Markdown({ key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})` })
         : span(ref.label, C.link, { underline: true })
       const pop = item ? [style === 'github' ? githubCard(item) : card(item)] : entry?.error ? [popup([[seg(entry.error, C.closed)]])] : []
       return Box({ key: `${id}-ref-${serial++}`, flexShrink: 0, children: [dot, label, ...pop] })
@@ -494,12 +489,6 @@ export const register: Register = (on, options) => {
     // The cells a reference takes: its label, plus the dot and a space unless it turned out missing.
     const refWidth = (ref: Ref) => ref.label.length + (entryOf(ref)?.missing ? 0 : 2)
 
-    const toggle = (href: string) => {
-      const k = `${id}:${href}`
-      if (expanded.has(k)) expanded.delete(k)
-      else expanded.add(k)
-      $.ui.invalidate('ui.render')
-    }
 
     type Style = { bold?: boolean; italic?: boolean }
 
@@ -664,45 +653,6 @@ export const register: Register = (on, options) => {
       }
     }
 
-    // The mockup's expanded panel: checks, reviews and threads, files.
-    const column = (title: string, rows: RenderElement[]) => Box({ flexDirection: 'column', flexGrow: 1, width: 0, children: [span(title, C.dim), ...rows] })
-    const panel = (item: Item) => {
-      const c = item.checks
-      const parts =
-        item.kind === 'pr' && c
-          ? [
-              column(`CHECKS ${c.ok}/${c.total}`, [
-                ...(item.failing ?? []).slice(0, 4).map((f) => line([span('✖', C.closed), ' ', f.url ? Link({ href: f.url, children: [span(f.name)] }) : f.name])),
-                ...(c.pending ? [line([span('●', C.warn), ` ${c.pending} running`])] : []),
-                line([span('✔', C.open), ` ${c.ok} passed`]),
-              ]),
-              column('REVIEWS', [
-                ...(item.approvedBy ?? []).map((l) => line([span('✔', C.open), ` ${who(l)} approved`])),
-                ...(item.changesBy ?? []).map((l) => line([span('●', C.warn), ` ${who(l)}: changes requested`])),
-                ...(!item.approvedBy?.length && !item.changesBy?.length ? [span('none yet', C.dim)] : []),
-                ...(item.threads?.length ? [span(`OPEN THREADS ${item.threads.length}`, C.dim), ...item.threads.slice(0, 3).map((t) => line([`${t.path.split('/').pop()}${t.line ? `:${t.line}` : ''}`]))] : []),
-              ]),
-              column(`FILES ${item.changedFiles}`, [
-                ...(item.files ?? []).map((f) => line([`${f.path.split('/').pop()} `, span(`+${f.additions}`, C.open), ' ', span(`−${f.deletions}`, C.closed)])),
-                ...((item.changedFiles ?? 0) > (item.files?.length ?? 0) ? [span(`+ ${(item.changedFiles ?? 0) - (item.files?.length ?? 0)} more files`, C.dim)] : []),
-              ]),
-            ]
-          : [column('ISSUE', [line([`@${item.author} · ${item.when} · ${item.comments} comments`], C.dim)])]
-      return Box({
-        flexDirection: 'column', borderStyle: 'round', borderColor: C.dim, paddingX: 1, rowGap: 1,
-        children: [
-          line([badge(item), '  ', span(`#${item.number} ${item.title}`, undefined, { bold: true })]),
-          Box({ flexDirection: 'row', columnGap: 3, children: parts }),
-          Markdown({ text: `[Open ${short(item.url)}](${item.url})` }),
-        ],
-      })
-    }
-
-    const drawn = parsed.map(draw)
-    const open = [...new Map(refs.flatMap((r) => {
-      const item = entryOf(r)?.item
-      return item && expanded.has(`${id}:${item.url}`) ? [[item.url, item] as const] : []
-    })).values()]
-    return Box({ flexDirection: 'column', rowGap: 1, children: [...drawn, ...open.map(panel)] })
+    return Box({ flexDirection: 'column', rowGap: 1, children: parsed.map(draw) })
   })
 }
