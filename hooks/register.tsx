@@ -65,38 +65,63 @@ let flushQueued = false
 // The signed-in GitHub user: their own reviews read "you", as in the mockup.
 let viewer = ''
 
-// The PRs and issues a click on a reference tracked, for the band above the prompt. Kept in the
-// mod's store so the list outlives a reload; `selected` is the one whose actions the band shows.
+// The PRs and issues a click on a reference tracked, for the band above the prompt. Each session
+// keeps its own list, in the mod's store under `tracked.<session id>`: the store is shared by every
+// session, and one session's list must not show in another. `selected` is the focused chip.
 type Tracked = { repo: string; number: number }
+type SavedList = { at: number; items: Tracked[] }
 let tracked: Tracked[] = []
 let trackedLoaded = false
+let session: string | null = null
 let selected: string | null = null
 // Approving is seen by others on GitHub: the first press arms it, the second sends it.
 let armed: string | null = null
+// A session's saved list goes once the session has been idle this long.
+const TRACKED_TTL_MS = 14 * 86_400_000
+
+const isTracked = (t: unknown): t is Tracked => !!t && typeof (t as Tracked).repo === 'string' && typeof (t as Tracked).number === 'number'
 
 function loadTracked($: EngineInterface) {
   if (trackedLoaded) return
   trackedLoaded = true
-  void $.store.get('tracked').then((value) => {
-    if (Array.isArray(value)) {
-      tracked = value.filter((t): t is Tracked => !!t && typeof (t as Tracked).repo === 'string' && typeof (t as Tracked).number === 'number')
-      $.ui.invalidate('ui.render')
+  void (async () => {
+    session = await $.session.id()
+    const saved = (await $.store.get(`tracked.${session}`)) as SavedList | undefined
+    const earlier = Array.isArray(saved?.items) ? saved.items.filter(isTracked) : []
+    // A click before the list came back is kept, after what the session tracked before.
+    const clicked = tracked.filter((t) => !earlier.some((e) => keyFor(e.repo, e.number) === keyFor(t.repo, t.number)))
+    tracked = [...earlier, ...clicked]
+    if (clicked.length) saveTracked($)
+    $.ui.invalidate('ui.render')
+    // Drop the lists of sessions idle past TRACKED_TTL_MS, and the one list 0.4 and 0.5 shared.
+    for (const key of await $.store.keys()) {
+      if (key === 'tracked') await $.store.delete(key)
+      else if (key.startsWith('tracked.') && key !== `tracked.${session}`) {
+        const other = (await $.store.get(key)) as SavedList | undefined
+        if (!other || typeof other.at !== 'number' || Date.now() - other.at > TRACKED_TTL_MS) await $.store.delete(key)
+      }
     }
-  }).catch(() => undefined)
+  })().catch(() => undefined)
+}
+
+function saveTracked($: EngineInterface) {
+  if (session) void $.store.set(`tracked.${session}`, { at: Date.now(), items: tracked } satisfies SavedList).catch(() => undefined)
 }
 
 function track($: EngineInterface, repo: string, number: number) {
+  // A click can come before the band ever drew: the session's list loads here, the click merges in.
+  loadTracked($)
   const key = keyFor(repo, number)
   if (!tracked.some((t) => keyFor(t.repo, t.number) === key)) tracked.push({ repo, number })
   selected = key
-  void $.store.set('tracked', tracked).catch(() => undefined)
+  saveTracked($)
   $.ui.invalidate('ui.render')
 }
 
 function untrack($: EngineInterface, key: string) {
   tracked = tracked.filter((t) => keyFor(t.repo, t.number) !== key)
   if (selected === key) selected = null
-  void $.store.set('tracked', tracked).catch(() => undefined)
+  saveTracked($)
   $.ui.invalidate('ui.render')
 }
 
