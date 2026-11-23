@@ -185,20 +185,23 @@ try:
         time.sleep(1)
         dump("3a-focused")
 
-        # The selected chip's bar (the row under it) differs in color from the other chip's bar.
-        def bar_color(at):
-            return screen.buffer[at[1]][at[0] - 1].fg if at else None
+        # The selected chip is two chips wide, underlined, and its number is not in the link color.
+        def look(number):
+            at = chip_at(number)
+            if not at:
+                return None
+            with lock:
+                row = screen.display[at[1] - 1]
+                cell = screen.buffer[at[1] - 1][at[0] - 1]
+            width = row.index("×", at[0]) - at[0]
+            return width, cell.underscore, cell.fg
 
         def picked():
-            with lock:
-                a, b = bar_color(first), bar_color(second)
-                bars = (screen.display[first[1]][first[0] - 1], screen.display[second[1]][second[0] - 1]) if first and second else ()
-            print("bars:", bars, a, b)
-            if not first or not second or a == b or set(bars) != {"▔"}:
+            a, b = look(1306), look(1250)
+            print("chips (width, underlined, number color):", a, b)
+            if not a or not b or not (a[1] and b[1]) or a[2] == b[2]:
                 return None
-            # The other chip's bar is the faint one: dimmer than the selected one's.
-            dim = lambda c: sum(int(c[i:i + 2], 16) for i in (0, 2, 4)) if len(c) == 6 else 0
-            return 1306 if dim(a) > dim(b) else 1250
+            return 1306 if a[0] > 40 and b[0] < 40 else 1250 if b[0] > 40 and a[0] < 40 else None
 
         before = picked()
         proc.write("\x1b[B")  # ↓ moves to the next control

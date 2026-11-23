@@ -856,17 +856,18 @@ export const register: Register = (on, options) => {
 
     const { Box, Text, Button, Link } = $.ui.resolve(e)
     const CHIP = 32
-    // Design H3b: no chip fills; a bar under every chip, in the theme's subtle color, and in its
-    // suggestion color under the selected one. Theme keys follow /theme, light themes included.
-    const BAR = 'subtle'
-    const PICKED_BAR = 'suggestion'
+    // Design U2 with W1: every chip underlined in its own colors (the terminal draws an underline in
+    // the text's color, on the chip's own row); the selected one in the theme's suggestion color and
+    // two chips wide, so more of its title shows. The GitHub card holds the rest.
+    const PICKED = 'suggestion'
+    const WIDE = 2 * CHIP + 1
     type Run = { text: string; color?: string; bold?: boolean }
 
-    const chip = (t: Tracked) => {
+    const chip = (t: Tracked, w: number) => {
       const key = keyFor(t.repo, t.number)
       const entry = cache.get(key)
       const item = entry?.item
-      const bar = selected === key ? PICKED_BAR : BAR
+      const picked = selected === key
       const runs: Run[] = []
       if (!item) runs.push({ text: ` ${entry?.error ? '✖' : '○'} `, color: entry?.error ? C.closed : C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
       else {
@@ -877,22 +878,24 @@ export const register: Register = (on, options) => {
         ]
         const head = `#${t.number} `
         // The title takes what the chip has left after the dot, number, checks, review and the ×.
-        const room = Math.max(4, CHIP - 3 - head.length - tail.reduce((n, r) => n + r.text.length, 0) - 3)
+        const room = Math.max(4, w - 3 - head.length - tail.reduce((n, r) => n + r.text.length, 0) - 3)
         const title = item.title.length > room ? `${item.title.slice(0, room - 1)}…` : item.title
         runs.push({ text: ` ${DOT} `, color: color(item) }, { text: head, color: C.link, bold: true }, { text: title }, ...tail)
       }
       const used = runs.reduce((n, r) => n + r.text.length, 0)
-      runs.push({ text: ' '.repeat(Math.max(1, CHIP - 3 - used)) })
+      runs.push({ text: ' '.repeat(Math.max(1, w - 3 - used)) }, { text: '×', color: C.dim })
       return Box({
-        key: `pr-cards-chip-${key}`, flexDirection: 'column', flexShrink: 0,
+        key: `pr-cards-chip-${key}`, flexDirection: 'row', flexShrink: 0,
         children: [
           // One focus stop per chip, so ↑ ↓ step chip by chip; the × marks what x removes.
           Button({
             key: `pr-cards-select-${key}`, label: `select #${t.number}`, plain: true,
             onPress: () => { selected = key; armed = null; $.ui.invalidate('ui.render') },
-            children: [...runs, { text: '× ', color: C.dim }].map((r) => Text({ color: r.color, bold: r.bold, children: [r.text] })),
+            children: [
+              ...runs.map((r) => Text({ color: picked ? PICKED : r.color, bold: r.bold, underline: true, children: [r.text] })),
+              Text({ children: [' '] }),
+            ],
           }),
-          Text({ color: bar, children: ['▔'.repeat(CHIP - 1)] }),
         ],
       })
     }
@@ -932,11 +935,28 @@ export const register: Register = (on, options) => {
       keys.push(hotkey('x', 'remove', () => untrack($, key)))
     }
 
-    const fit = Math.max(1, Math.min(perRow, Math.floor((Math.max(20, e.props.bodyColumns) - 2) / (CHIP + 1))))
+    // Rows fill left to right: `perRow` chips at most, the selected one counting as two, and no
+    // wider than the band. Without room for a wide chip the selected one keeps the normal width.
+    const columns = Math.max(20, e.props.bodyColumns) - 2
+    const wide = WIDE <= columns
     const rows: RenderElement[] = []
-    for (let i = 0; i < tracked.length; i += fit) {
-      rows.push(Box({ flexDirection: 'row', columnGap: 1, paddingLeft: 2, children: tracked.slice(i, i + fit).map(chip) }))
+    let line: RenderElement[] = []
+    let slots = 0
+    let width = 0
+    for (const t of tracked) {
+      const w = wide && keyFor(t.repo, t.number) === selected ? WIDE : CHIP
+      const cost = w === WIDE ? 2 : 1
+      if (line.length && (slots + cost > perRow || width + w > columns)) {
+        rows.push(Box({ flexDirection: 'row', columnGap: 1, paddingLeft: 2, children: line }))
+        line = []
+        slots = 0
+        width = 0
+      }
+      line.push(chip(t, w))
+      slots += cost
+      width += w + 1
     }
+    if (line.length) rows.push(Box({ flexDirection: 'row', columnGap: 1, paddingLeft: 2, children: line }))
     // The keys the engine gives a band: the focus chord takes the keyboard, ↑↓ and tab move between
     // controls, esc gives it back. ←→ do nothing here, and a mod cannot bind them.
     void refreshFocusChord($)
