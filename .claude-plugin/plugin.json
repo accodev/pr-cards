@@ -1,6 +1,6 @@
 {
   "name": "pr-cards",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "license": "MIT",
   "description": "GitHub pull request chips with hover cards in the Claude Code transcript.",
   "userConfig": {
@@ -9,6 +9,18 @@
       "title": "Card style",
       "description": "How the hover card looks: card, the full card with checks, reviews and threads; or github, laid out as GitHub's own hover card.",
       "default": "card"
+    },
+    "trackedBand": {
+      "type": "boolean",
+      "title": "Tracked PRs above the prompt",
+      "description": "A click on a reference adds it to a band above the prompt, with actions for the selected one. Off: a click does nothing.",
+      "default": true
+    },
+    "bandPerRow": {
+      "type": "number",
+      "title": "Tracked PRs per row",
+      "description": "How many tracked PRs fit on one row of the band, 1 to 6; more start a new row.",
+      "default": 3
     }
   }
 }

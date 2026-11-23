@@ -142,9 +142,25 @@ try:
     proc.write(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m")  # a plain click
     time.sleep(2)
     dump("3-click")
-    # A plain click opens no panel in the transcript any more.
-    clicked = "CHECKS" not in text() and "crashed" not in text()
-    print("click opens no panel:", clicked)
+    # A plain click tracks the PR: a chip and the selected PR's action bar show above the prompt.
+    # The e2e never presses approve: that would approve a real PR.
+    bar = find("#1306 selected ·")
+    chip_x = None
+    if bar:
+        for row in range(bar[1], min(ROWS, bar[1] + 4)):
+            line = text().split("\n")[row]
+            if "#1306" in line and "×" in line:
+                chip_x = (line.index("×", line.index("#1306")) + 1, row + 1)
+                break
+    print("tracked chip and action bar:", bool(bar), chip_x)
+    clicked = bool(bar) and chip_x is not None and "crashed" not in text()
+    if chip_x:
+        proc.write(f"\x1b[<0;{chip_x[0]};{chip_x[1]}M\x1b[<0;{chip_x[0]};{chip_x[1]}m")  # × removes it
+        time.sleep(2)
+        dump("3b-untracked")
+        gone = "selected ·" not in text()
+        print("× removed it:", gone)
+        clicked = clicked and gone
 
     # The real list: 15 PRs with long titles, the reply that once crashed the hooks worker.
     proc.write("/clear\r")

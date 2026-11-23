@@ -63,9 +63,9 @@ test('draws references in text and in a numbers column with a dot, a link and th
   expect(links).toContain('https://github.com/acme/pos-api/issues/1250')
   expect(links).toContain('https://github.com/other/lib/issues/3')
 
-  // A click on a reference opens nothing in the transcript: the links carry no press handler.
+  // A plain click on a reference tracks it (the band test covers that); the transcript opens nothing.
   const link = await ui.find({ type: 'Markdown', text: '[#1319](https://github.com/acme/pos-api/pull/1319)' })
-  expect(link?.props.pressableLinks).toBeUndefined()
+  expect(link?.props.pressableLinks).toEqual([PR.url])
 })
 
 test('wraps a card row whose word fills the row exactly', async ($, on) => {
@@ -190,6 +190,51 @@ test('moves the checks to their own row when a long login fills the GitHub-style
   const texts = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
   expect(texts).toContain('✔ you approved')
   expect(texts).toContain('✖ 1 of 2 checks') // whole, on its own row
+})
+
+test('a click tracks a PR in the band above the prompt, with actions for the selected chip', async ($, on) => {
+  const clock = mock.clock(on)
+  const runs: string[][] = []
+  on('process.run', ($, e) => {
+    runs.push([...e.argv])
+    if (e.argv[1] === 'repo') return ok('acme/pos-api\n')
+    if (e.argv[1] === 'api') return ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR } } }))
+    return ok('')
+  })
+  on('ui.toast', () => ({ value: undefined }))
+  const reply = await $.ui.mount(message('See #1319.'))
+  await clock.settle()
+  await clock.settle()
+  const link = await reply.find({ type: 'Markdown', text: '[#1319](https://github.com/acme/pos-api/pull/1319)' })
+  await reply.press({ key: String(link?.props.key), link: { href: PR.url } })
+
+  const bandInput = {
+    plugin: 'pr-cards', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
+    viewport: { columns: 120, rows: 40 },
+    props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 115 },
+  } as const
+  const band = await $.ui.mount(bandInput as never)
+  await clock.settle()
+  // The click tracked #1319 and selected it: its chip and its action bar show.
+  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: 'selected ·' })).toBeDefined()
+  // The failing check's run (…/actions/runs/7) is re-run, failed jobs only.
+  await band.press({ key: 'pr-cards-rerun' })
+  await clock.settle()
+  expect(runs).toContainEqual(['gh', 'run', 'rerun', '7', '--failed', '--repo', 'acme/pos-api'])
+
+  // Approving takes two presses; only the second runs gh.
+  await band.press({ key: 'pr-cards-approve' })
+  expect(runs.some((r) => r[1] === 'pr' && r[2] === 'review')).toBe(false)
+  expect(await band.find({ type: 'Text', text: ' ✔ press again to approve ' })).toBeDefined()
+  await band.press({ key: 'pr-cards-approve' })
+  await clock.settle()
+  expect(runs).toContainEqual(['gh', 'pr', 'review', '1319', '--repo', 'acme/pos-api', '--approve'])
+
+  // × removes it, and the band goes away with the last chip.
+  await band.press({ key: 'pr-cards-untrack-acme/pos-api#1319' })
+  await clock.settle()
+  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeUndefined()
 })
 
 test('leaves a message without references to Claude Code', async ($, on) => {
