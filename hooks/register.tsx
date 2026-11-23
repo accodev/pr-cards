@@ -800,9 +800,6 @@ export const register: Register = (on, options) => {
             refresh()
           }))
         }
-        if (isOpen && item.repo.toLowerCase() === (cwdRepo ?? '').toLowerCase()) {
-          keys.push(hotkey('c', 'check out', () => act($, ['gh', 'pr', 'checkout', String(item.number), '--repo', item.repo], `checked out #${item.number}`)))
-        }
         keys.push(hotkey('o', 'open', () => act($, web, `opened #${item.number}`)))
       }
       keys.push(hotkey('x', 'remove', () => untrack($, key)))

@@ -218,8 +218,7 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   // The click tracked #1319 and selected it: its chip and the hotkey row show.
   expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
   const hotkeys = (await band.findAll({ type: 'Button' })).flatMap((b) => (b.props.hotkey ? [`${b.props.hotkey}: ${b.props.label}`] : []))
-  // c: check out shows because the PR is in the session's own repo.
-  expect(hotkeys).toEqual(['a: approve', 'r: request changes', 'f: re-run failed', 'c: check out', 'o: open', 'x: remove'])
+  expect(hotkeys).toEqual(['a: approve', 'r: request changes', 'f: re-run failed', 'o: open', 'x: remove'])
 
   // f: the failing check's run (…/actions/runs/7) is re-run, failed jobs only.
   await band.press({ key: 'pr-cards-f' })
