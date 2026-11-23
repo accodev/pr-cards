@@ -313,6 +313,35 @@ test('keeps tracked PRs per session: another session\'s list stays out of this b
   expect(store['tracked.other']).toBeDefined()
 })
 
+test('names the focus chord the person bound in keybindings.json in the band hint', async ($, on) => {
+  const clock = mock.clock(on)
+  const store: Record<string, unknown> = { 'tracked.session-a': { at: Date.now(), items: [{ repo: 'acme/pos-api', number: 1319 }] } }
+  on('store.get', ($, e) => ({ value: store[e.key] }) as never)
+  on('store.set', ($, e) => ((store[e.key] = e.value), { value: undefined }) as never)
+  on('store.delete', ($, e) => (delete store[e.key], { value: undefined }) as never)
+  on('store.keys', () => ({ value: Object.keys(store) }) as never)
+  on('session.id', () => ({ value: 'session-a' }))
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR } } }))))
+  const reads: string[] = []
+  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }) as never)
+  on('fs.read', ($, e) => {
+    reads.push(e.path)
+    return { value: JSON.stringify({ bindings: [{ context: 'Chat', bindings: { 'ctrl+x tab': null, 'alt+a': 'abovePrompt:focus' } }] }) } as never
+  })
+  const band = await $.ui.mount({
+    plugin: 'pr-cards', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
+    viewport: { columns: 120, rows: 40 },
+    props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 115 },
+  } as never)
+  await clock.settle()
+  await clock.settle()
+  expect(reads.length).toBe(1)
+  expect(reads[0]).toMatch(/home[\\/]me[\\/]\.claude[\\/]keybindings\.json$/) // the engine writes the path the OS's way
+  const texts = (await band.findAll({ type: 'Text' })).map((t) => String(t.text))
+  expect(texts.some((t) => t.includes('or alt+a for the keys'))).toBe(true)
+  expect(texts.some((t) => t.includes('ctrl+x'))).toBe(false)
+})
+
 test('leaves a message without references to Claude Code', async ($, on) => {
   on('process.run', () => {
     throw new Error('gh must not run')

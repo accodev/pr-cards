@@ -163,7 +163,25 @@ try:
         first = chip_at(1306)
         proc.write(f"\x1b[<0;{first[0]};{first[1]}M\x1b[<0;{first[0]};{first[1]}m")  # selects the first chip
         time.sleep(1)
-        proc.write("\x18\t")  # ctrl+x then tab: the band takes the keyboard
+        # The band hint names the focus chord the person bound (keybindings.json); type that one.
+        import re
+        named = re.search(r"or (.+?) for the keys", text())
+
+        def keys_of(chord):
+            out = ""
+            for part in chord.split(" then "):
+                *mods, key = part.split("+")
+                key = {"tab": "\t", "enter": "\r", "space": " "}.get(key, key)
+                if "ctrl" in mods and len(key) == 1 and key.isalpha():
+                    key = chr(ord(key) - 96)
+                if "alt" in mods or "meta" in mods:
+                    key = "\x1b" + key
+                out += key
+            return out
+
+        focus = keys_of(named.group(1)) if named else "\x18\t"
+        print("hint names the focus chord:", named.group(1) if named else None)
+        proc.write(focus)  # the band takes the keyboard
         time.sleep(1)
         dump("3a-focused")
 
@@ -180,7 +198,7 @@ try:
         time.sleep(1)
         after = picked()
         dump("3b-arrow")
-        print("focused after ctrl+x tab:", before, "after ↓:", after)
+        print("focused after the focus chord:", before, "after ↓:", after)
         moved = before is not None and after is not None and before != after
         # c copies the focused one as a link: the clipboard holds an HTML link and the plain text.
         proc.write("c")
@@ -204,7 +222,7 @@ try:
         for _ in range(3):
             if not (chip_at(1306) or chip_at(1250)):
                 break
-            proc.write("\x18\tx")  # ctrl+x tab, then x on whichever chip holds the focus
+            proc.write(focus + "x")  # focus the band, then x on whichever chip holds the focus
             time.sleep(2)
     else:
         clicked = False
