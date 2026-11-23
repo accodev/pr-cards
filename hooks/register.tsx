@@ -459,14 +459,21 @@ export const register: Register = (on, options) => {
       if (item.head && item.base) {
         rows.push([linked(item.head, `${repoUrl}/tree/${item.head}`, C.code), seg(' → ', C.dim), linked(item.base, `${repoUrl}/tree/${item.base}`, C.code)])
       }
-      const foot: Seg[] = []
-      if (item.kind === 'issue') foot.push(person(item.author), seg(` · ${item.when} · `, C.dim), linked(`${item.comments} comments`, item.url, C.dim))
+      // Design 9c: the footer opens with who opened it, then the review and the checks.
+      const foot: Seg[] = [seg('opened by ', C.dim), person(item.author), seg(' · ', C.dim)]
+      if (item.kind === 'issue') foot.push(linked(`${item.comments} comments`, item.url, C.dim))
+      // Your own review reads as the mockup says it, short enough to keep the footer on one row.
+      else if (item.changesBy?.length === 1 && item.changesBy[0] === viewer) foot.push(seg('● you requested changes', C.warn))
       else if (item.changesBy?.length) foot.push(seg('● changes requested by ', C.warn), ...people(item.changesBy, C.warn))
+      else if (item.approvedBy?.length === 1 && item.approvedBy[0] === viewer) foot.push(seg('✔ you approved', C.open))
       else if (item.approvedBy?.length) foot.push(seg('✔ approved by ', C.open), ...people(item.approvedBy, C.open))
       else foot.push(seg(REVIEW_WORD[item.review ?? ''] ?? 'no reviews yet', C.dim))
       const c = item.checks
-      if (c?.total) foot.push(seg(' · ', C.dim), linked(`${c.failed ? '✖' : '✔'} ${c.ok} of ${c.total} checks`, `${item.url}/checks`, c.failed ? C.closed : C.open))
-      return popup([...rows, [], foot])
+      if (!c?.total) return popup([...rows, [], foot])
+      const checks = linked(`${c.failed ? '✖' : '✔'} ${c.ok} of ${c.total} checks`, `${item.url}/checks`, c.failed ? C.closed : C.open)
+      // A long login would wrap the checks in the middle: then they take a row of their own.
+      const fits = foot.reduce((n, s) => n + s.text.length, 0) + 3 + checks.text.length <= INNER
+      return popup([...rows, [], ...(fits ? [[...foot, seg(' · ', C.dim), checks]] : [foot, [checks]])])
     }
 
     // A reference where the text has it: the state dot, the number as a link, the card on hover.
