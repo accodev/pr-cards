@@ -856,15 +856,17 @@ export const register: Register = (on, options) => {
 
     const { Box, Text, Button, Link } = $.ui.resolve(e)
     const CHIP = 32
-    const CHIP_BG = 'ansi256(237)'
-    const PICKED_BG = 'ansi256(24)'
+    // Design H3b: no chip fills; a bar under every chip, in the theme's subtle color, and in its
+    // suggestion color under the selected one. Theme keys follow /theme, light themes included.
+    const BAR = 'subtle'
+    const PICKED_BAR = 'suggestion'
     type Run = { text: string; color?: string; bold?: boolean }
 
     const chip = (t: Tracked) => {
       const key = keyFor(t.repo, t.number)
       const entry = cache.get(key)
       const item = entry?.item
-      const bg = selected === key ? PICKED_BG : CHIP_BG
+      const bar = selected === key ? PICKED_BAR : BAR
       const runs: Run[] = []
       if (!item) runs.push({ text: ` ${entry?.error ? '✖' : '○'} `, color: entry?.error ? C.closed : C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
       else {
@@ -882,14 +884,15 @@ export const register: Register = (on, options) => {
       const used = runs.reduce((n, r) => n + r.text.length, 0)
       runs.push({ text: ' '.repeat(Math.max(1, CHIP - 3 - used)) })
       return Box({
-        key: `pr-cards-chip-${key}`, flexDirection: 'row', flexShrink: 0,
+        key: `pr-cards-chip-${key}`, flexDirection: 'column', flexShrink: 0,
         children: [
-          // One focus stop per chip, so ← → step chip by chip; the × marks what x removes.
+          // One focus stop per chip, so ↑ ↓ step chip by chip; the × marks what x removes.
           Button({
             key: `pr-cards-select-${key}`, label: `select #${t.number}`, plain: true,
             onPress: () => { selected = key; armed = null; $.ui.invalidate('ui.render') },
-            children: [...runs, { text: '× ', color: C.dim }].map((r) => Text({ color: r.color, bold: r.bold, backgroundColor: bg, children: [r.text] })),
+            children: [...runs, { text: '× ', color: C.dim }].map((r) => Text({ color: r.color, bold: r.bold, children: [r.text] })),
           }),
+          Text({ color: bar, children: ['▔'.repeat(CHIP - 1)] }),
         ],
       })
     }
