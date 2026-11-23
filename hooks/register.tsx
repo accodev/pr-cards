@@ -1,4 +1,4 @@
-import type { EngineInterface, Register, RenderElement } from 'claude-code'
+import type { EngineInterface, Register, RenderElement, RenderSurface } from 'claude-code'
 
 type Checks = { ok: number; failed: number; pending: number; total: number }
 type Item = {
@@ -126,6 +126,58 @@ function untrack($: EngineInterface, key: string) {
 }
 
 // Runs a gh command for an action and reports how it went in a toast.
+// ---------- Copying a link as rich text ----------
+
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+// Bytes of `s` in UTF-8: CF_HTML's offsets count bytes, not characters.
+function utf8Length(s: string) {
+  let n = 0
+  for (const ch of s) {
+    const code = ch.codePointAt(0)!
+    n += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4
+  }
+  return n
+}
+
+// The Windows clipboard's HTML format: a header of byte offsets around the fragment.
+function cfHtml(fragment: string) {
+  const pre = '<html><body><!--StartFragment-->'
+  const post = '<!--EndFragment--></body></html>'
+  const header = (a: number, b: number, c: number, d: number) =>
+    `Version:0.9\r\nStartHTML:${String(a).padStart(10, '0')}\r\nEndHTML:${String(b).padStart(10, '0')}\r\nStartFragment:${String(c).padStart(10, '0')}\r\nEndFragment:${String(d).padStart(10, '0')}\r\n`
+  const startHtml = utf8Length(header(0, 0, 0, 0))
+  const startFragment = startHtml + utf8Length(pre)
+  const endFragment = startFragment + utf8Length(fragment)
+  const endHtml = endFragment + utf8Length(post)
+  return header(startHtml, endHtml, startFragment, endFragment) + pre + fragment + post
+}
+
+// Windows PowerShell 5.1 puts both formats on the clipboard in one data object: HTML for chats such
+// as Teams, plain text for everything else. It reads them as JSON on stdin, so no quoting reaches a shell.
+const CLIPBOARD_PS =
+  "[Console]::InputEncoding=[Text.Encoding]::UTF8; $in=[Console]::In.ReadToEnd() | ConvertFrom-Json; " +
+  'Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.DataObject; ' +
+  "$d.SetData('HTML Format', $in.html); $d.SetData('UnicodeText', $in.text); " +
+  '[System.Windows.Forms.Clipboard]::SetDataObject($d, $true)'
+
+// `acme/shop#58` as a link, then the title: what a chat shows when it takes rich text.
+async function copyLink($: EngineInterface, item: Item, surface: RenderSurface) {
+  const label = `${item.repo}#${item.number}`
+  const html = `<a href="${escapeHtml(item.url)}">${escapeHtml(label)}</a> ${escapeHtml(item.title)}`
+  const text = `${label} ${item.title} ${item.url}`
+  try {
+    const out = await $.process.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', CLIPBOARD_PS], {
+      stdin: JSON.stringify({ html: cfHtml(html), text }), timeoutMs: 15_000,
+    })
+    if (out.exitCode === 0) return $.ui.toast(`copied ${label} as a link`)
+  } catch {
+    // No Windows PowerShell here: the plain text below still gets the link across.
+  }
+  await $.ui.copy({ text, surface }).catch(() => undefined)
+  $.ui.toast(`copied ${label} as plain text`)
+}
+
 async function act($: EngineInterface, argv: string[], done: string) {
   try {
     const out = await $.process.run(argv, { timeoutMs: 60_000 })
@@ -826,6 +878,7 @@ export const register: Register = (on, options) => {
           }))
         }
         keys.push(hotkey('o', 'open', () => act($, web, `opened #${item.number}`)))
+        keys.push(hotkey('c', 'copy link', () => copyLink($, item, e.surface)))
       }
       keys.push(hotkey('x', 'remove', () => untrack($, key)))
     }
