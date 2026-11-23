@@ -195,13 +195,22 @@ test('moves the checks to their own row when a long login fills the GitHub-style
 test('a click tracks a PR in the band above the prompt, with actions for the selected chip', async ($, on) => {
   const clock = mock.clock(on)
   const runs: string[][] = []
+  const stdins: string[] = []
+  // The first powershell.exe call fails, as on a machine without Windows PowerShell.
+  let powershellWorks = true
+  const copies: string[] = []
   on('process.run', ($, e) => {
     runs.push([...e.argv])
+    if (e.argv[0] === 'powershell.exe') {
+      stdins.push(String(e.init?.stdin ?? ''))
+      return powershellWorks ? ok('') : { value: { exitCode: 1, stdout: '', stderr: 'not found', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv[1] === 'repo') return ok('acme/pos-api\n')
     if (e.argv[1] === 'api') return ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR } } }))
     return ok('')
   })
   on('ui.toast', () => ({ value: undefined }))
+  on('ui.copy', ($, e) => (copies.push(e.text), { value: { isCopied: true } }) as never)
   const reply = await $.ui.mount(message('See #1319.'))
   await clock.settle()
   await clock.settle()
@@ -218,7 +227,25 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   // The click tracked #1319 and selected it: its chip and the hotkey row show.
   expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
   const hotkeys = (await band.findAll({ type: 'Button' })).flatMap((b) => (b.props.hotkey ? [`${b.props.hotkey}: ${b.props.label}`] : []))
-  expect(hotkeys).toEqual(['a: approve', 'r: request changes', 'f: re-run failed', 'o: open', 'x: remove'])
+  expect(hotkeys).toEqual(['a: approve', 'r: request changes', 'f: re-run failed', 'o: open', 'c: copy link', 'x: remove'])
+
+  // c: the link as rich text (the clipboard's HTML format) and as plain text, through Windows PowerShell.
+  await band.press({ key: 'pr-cards-c' })
+  await clock.settle()
+  const sent = JSON.parse(stdins[0]!) as { html: string; text: string }
+  expect(sent.text).toBe(`acme/pos-api#1319 fix: round VAT per line ${PR.url}`)
+  const fragment = `<a href="${PR.url}">acme/pos-api#1319</a> fix: round VAT per line`
+  expect(sent.html).toContain(`<!--StartFragment-->${fragment}<!--EndFragment-->`)
+  // The header's offsets point at the fragment (all ASCII here, so bytes are characters).
+  const start = Number(/StartFragment:(\d+)/.exec(sent.html)![1])
+  const end = Number(/EndFragment:(\d+)/.exec(sent.html)![1])
+  expect(sent.html.slice(start, end)).toBe(fragment)
+  expect(copies).toEqual([])
+  // Without Windows PowerShell it falls back to Claude Code's own copy, plain text.
+  powershellWorks = false
+  await band.press({ key: 'pr-cards-c' })
+  await clock.settle()
+  expect(copies).toEqual([`acme/pos-api#1319 fix: round VAT per line ${PR.url}`])
 
   // f: the failing check's run (…/actions/runs/7) is re-run, failed jobs only.
   await band.press({ key: 'pr-cards-f' })

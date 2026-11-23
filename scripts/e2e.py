@@ -182,6 +182,16 @@ try:
         dump("3b-arrow")
         print("focused after ctrl+x tab:", before, "after ↓:", after)
         moved = before is not None and after is not None and before != after
+        # c copies the focused one as a link: the clipboard holds an HTML link and the plain text.
+        proc.write("c")
+        time.sleep(4)
+        import subprocess
+        clip = subprocess.run(["powershell.exe", "-NoProfile", "-Command",
+                               "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Clipboard -TextFormatType Html | Select-Object -Last 1; '---'; Get-Clipboard -TextFormatType UnicodeText"],
+                              capture_output=True, encoding="utf-8")
+        copied = f'#{after}</a>' in clip.stdout and f'/{after}' in clip.stdout.split('---')[-1]
+        print("c copied a link:", copied, repr(clip.stdout.strip()[-160:]))
+        moved = moved and copied
         proc.write("x")
         time.sleep(2)
         dump("3c-removed")
