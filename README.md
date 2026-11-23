@@ -7,6 +7,7 @@ A Claude Code mod that turns GitHub pull request and issue references in Claude'
 - `#1234`, `owner/repo#1234`, GitHub URLs and the numbers in a table column headed `#`, `PR` or `Issue` get a dot in the state's color: green open, gray draft, purple merged, red closed.
 - Hovering a reference opens a card: state, title, author, age, size, checks, reviews and open threads.
 - Every reference in the card is a link: repo, title references, author, reviewers, files, checks and the failing check's run. Ctrl+click opens it.
+- A plain click on a reference tracks it in a band above the prompt: one chip per PR, three to a row, `×` to remove it. A click on a chip selects it, and the bar above the chips offers its actions: approve (press twice), request changes (opens the files tab), re-run the failed checks, check out, open.
 
 The details come from one `gh api graphql` call per repo, cached for 60 seconds.
 
@@ -32,7 +33,9 @@ Then run `/reload-plugins` in a running session, or start a new one. Remove it w
 - `card` draws the full card: state, title, author, size, checks, reviews and threads.
 - `github` draws GitHub's own hover card layout: repo and date, state with title and number, branches, then the review and checks.
 
-Set it in `/plugin`, or from the shell:
+`trackedBand` (default `true`) turns the band above the prompt on or off. `bandPerRow` (default `3`, up to `6`) sets how many tracked PRs share a row.
+
+Set them in `/plugin`, or from the shell:
 
 ```sh
 echo '{"cardStyle": "github"}' | claude plugin configure pr-cards@pr-cards --values-stdin

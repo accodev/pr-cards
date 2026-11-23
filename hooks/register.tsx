@@ -65,6 +65,51 @@ let flushQueued = false
 // The signed-in GitHub user: their own reviews read "you", as in the mockup.
 let viewer = ''
 
+// The PRs and issues a click on a reference tracked, for the band above the prompt. Kept in the
+// mod's store so the list outlives a reload; `selected` is the one whose actions the band shows.
+type Tracked = { repo: string; number: number }
+let tracked: Tracked[] = []
+let trackedLoaded = false
+let selected: string | null = null
+// Approving is seen by others on GitHub: the first press arms it, the second sends it.
+let armed: string | null = null
+
+function loadTracked($: EngineInterface) {
+  if (trackedLoaded) return
+  trackedLoaded = true
+  void $.store.get('tracked').then((value) => {
+    if (Array.isArray(value)) {
+      tracked = value.filter((t): t is Tracked => !!t && typeof (t as Tracked).repo === 'string' && typeof (t as Tracked).number === 'number')
+      $.ui.invalidate('ui.render')
+    }
+  }).catch(() => undefined)
+}
+
+function track($: EngineInterface, repo: string, number: number) {
+  const key = keyFor(repo, number)
+  if (!tracked.some((t) => keyFor(t.repo, t.number) === key)) tracked.push({ repo, number })
+  selected = key
+  void $.store.set('tracked', tracked).catch(() => undefined)
+  $.ui.invalidate('ui.render')
+}
+
+function untrack($: EngineInterface, key: string) {
+  tracked = tracked.filter((t) => keyFor(t.repo, t.number) !== key)
+  if (selected === key) selected = null
+  void $.store.set('tracked', tracked).catch(() => undefined)
+  $.ui.invalidate('ui.render')
+}
+
+// Runs a gh command for an action and reports how it went in a toast.
+async function act($: EngineInterface, argv: string[], done: string) {
+  try {
+    const out = await $.process.run(argv, { timeoutMs: 60_000 })
+    $.ui.toast(out.exitCode === 0 ? done : `${argv.slice(0, 3).join(' ')} failed: ${out.stderr.trim().split('\n')[0] || `exit ${out.exitCode}`}`)
+  } catch (err) {
+    $.ui.toast(`${argv.slice(0, 3).join(' ')} failed: ${String(err)}`)
+  }
+}
+
 const keyFor = (repo: string, number: number) => `${repo.toLowerCase()}#${number}`
 const repoOf = (r: Ref) => r.repo ?? cwdRepo
 const entryOf = (r: Ref) => {
@@ -321,6 +366,9 @@ const short = (url: string) => url.replace(/^https:\/\//, '')
 export const register: Register = (on, options) => {
   // `card` (the default) or `github`, from the plugin's settings.
   const style = String(options.cardStyle ?? 'card').trim().toLowerCase() === 'github' ? 'github' : 'card'
+  // The band of tracked PRs above the prompt, on unless the setting says false.
+  const band = options.trackedBand !== false && String(options.trackedBand ?? 'true').toLowerCase() !== 'false'
+  const perRow = Math.max(1, Math.min(6, Math.round(Number(options.bandPerRow) || 3)))
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const parsed = blocks(e.props.text)
     const refs = parsed.flatMap(blockRefs)
@@ -480,7 +528,11 @@ export const register: Register = (on, options) => {
       // A gray filled dot is a draft; loading is hollow and a failed lookup a cross, so neither reads as a state.
       const dot = item ? span(`${DOT} `, color(item)) : entry?.error ? span('✖ ', C.closed) : span('○ ', C.dim)
       const label = item
-        ? Markdown({ key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})` })
+        ? Markdown({
+            key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})`,
+            // A plain click tracks it in the band above the prompt; ctrl+click still opens GitHub.
+            ...(band ? { pressableLinks: [item.url], onLinkPress: () => track($, item.repo, item.number) } : {}),
+          })
         : span(ref.label, C.link, { underline: true })
       const pop = item ? [style === 'github' ? githubCard(item) : card(item)] : entry?.error ? [popup([[seg(entry.error, C.closed)]])] : []
       return Box({ key: `${id}-ref-${serial++}`, flexShrink: 0, children: [dot, label, ...pop] })
@@ -654,5 +706,99 @@ export const register: Register = (on, options) => {
     }
 
     return Box({ flexDirection: 'column', rowGap: 1, children: parsed.map(draw) })
+  })
+
+  // Design B2c: the tracked PRs as chips above the prompt, `perRow` to a row, and one action bar
+  // for the selected chip, so the chip rows never move when the selection changes.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const theirs = await next(e)
+    if (!band) return theirs
+    loadTracked($)
+    if (!tracked.length || e.props.hasSurvey) return theirs
+    for (const t of tracked) want($, { repo: t.repo, number: t.number, label: '' })
+
+    const { Box, Text, Button, Link } = $.ui.resolve(e)
+    const CHIP = 32
+    const CHIP_BG = 'ansi256(237)'
+    const PICKED_BG = 'ansi256(24)'
+    type Run = { text: string; color?: string; bold?: boolean }
+
+    const chip = (t: Tracked) => {
+      const key = keyFor(t.repo, t.number)
+      const entry = cache.get(key)
+      const item = entry?.item
+      const bg = selected === key ? PICKED_BG : CHIP_BG
+      const runs: Run[] = []
+      if (!item) runs.push({ text: ` ${entry?.error ? '✖' : '○'} `, color: entry?.error ? C.closed : C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
+      else {
+        const c = item.checks
+        const tail: Run[] = [
+          ...(c?.total ? [{ text: ` ${c.failed ? '✖' : c.pending ? '●' : '✔'} ${c.ok}/${c.total}`, color: c.failed ? C.closed : c.pending ? C.warn : C.open }] : []),
+          ...(item.changesBy?.length ? [{ text: ' ●', color: C.warn }] : item.approvedBy?.length ? [{ text: ' ✔', color: C.open }] : []),
+        ]
+        const head = `#${t.number} `
+        // The title takes what the chip has left after the dot, number, checks, review and the ×.
+        const room = Math.max(4, CHIP - 3 - head.length - tail.reduce((n, r) => n + r.text.length, 0) - 3)
+        const title = item.title.length > room ? `${item.title.slice(0, room - 1)}…` : item.title
+        runs.push({ text: ` ${DOT} `, color: color(item) }, { text: head, color: C.link, bold: true }, { text: title }, ...tail)
+      }
+      const used = runs.reduce((n, r) => n + r.text.length, 0)
+      runs.push({ text: ' '.repeat(Math.max(1, CHIP - 3 - used)) })
+      return Box({
+        key: `pr-cards-chip-${key}`, flexDirection: 'row', flexShrink: 0,
+        children: [
+          Button({ key: `pr-cards-select-${key}`, label: `select #${t.number}`, plain: true, onPress: () => { selected = selected === key ? null : key; armed = null; $.ui.invalidate('ui.render') }, children: runs.map((r) => Text({ color: r.color, bold: r.bold, backgroundColor: bg, children: [r.text] })) }),
+          Button({ key: `pr-cards-untrack-${key}`, label: `remove #${t.number}`, plain: true, onPress: () => untrack($, key), children: [Text({ color: C.dim, backgroundColor: bg, children: ['× '] })] }),
+        ],
+      })
+    }
+
+    const action = (key: string, label: string, bg: string, fg: string | undefined, onPress: () => unknown) =>
+      Button({ key, label, plain: true, onPress, children: [Text({ color: fg, backgroundColor: bg, children: [` ${label} `] })] })
+    const linkAction = (label: string, href: string, bg: string, fg?: string) => Link({ href, children: [Text({ color: fg, backgroundColor: bg, children: [` ${label} `] })] })
+
+    const picked = tracked.find((t) => keyFor(t.repo, t.number) === selected)
+    const item = picked ? cache.get(keyFor(picked.repo, picked.number))?.item : undefined
+    let bar: RenderElement
+    if (!picked || !item) {
+      bar = Text({ color: C.dim, children: [`  tracked · click a chip for its actions · × removes it`] })
+    } else {
+      const key = keyFor(item.repo, item.number)
+      const isOpen = item.kind === 'pr' && (item.state === 'OPEN' || item.state === 'DRAFT')
+      const runIds = [...new Set((item.failing ?? []).flatMap((f) => /\/actions\/runs\/(\d+)/.exec(f.url ?? '')?.[1] ?? []))]
+      const refresh = () => { cache.delete(key); want($, { repo: item.repo, number: item.number, label: '' }) }
+      const buttons: RenderElement[] = []
+      if (isOpen && item.author !== viewer) {
+        buttons.push(action('pr-cards-approve', armed === key ? '✔ press again to approve' : '✔ approve', 'ansi256(22)', 'ansi256(15)', async () => {
+          if (armed !== key) { armed = key; $.ui.invalidate('ui.render'); return }
+          armed = null
+          await act($, ['gh', 'pr', 'review', String(item.number), '--repo', item.repo, '--approve'], `approved #${item.number}`)
+          refresh()
+        }))
+        buttons.push(linkAction('● request changes ↗', `${item.url}/files`, 'ansi256(58)', 'ansi256(11)'))
+      }
+      if (runIds.length) {
+        buttons.push(action('pr-cards-rerun', '↻ re-run failed', 'ansi256(238)', undefined, async () => {
+          for (const run of runIds) await act($, ['gh', 'run', 'rerun', run, '--failed', '--repo', item.repo], `re-running the failed jobs of #${item.number}`)
+          refresh()
+        }))
+      }
+      if (isOpen && item.repo.toLowerCase() === (cwdRepo ?? '').toLowerCase()) {
+        buttons.push(action('pr-cards-checkout', '⎇ check out', 'ansi256(238)', undefined, () => act($, ['gh', 'pr', 'checkout', String(item.number), '--repo', item.repo], `checked out #${item.number}`)))
+      }
+      buttons.push(linkAction('↗ open', item.url, 'ansi256(238)'))
+      bar = Box({
+        flexDirection: 'row', flexWrap: 'wrap', columnGap: 1, paddingLeft: 2,
+        children: [Text({ color: C.link, bold: true, children: [`#${item.number}`] }), Text({ color: C.dim, children: ['selected ·'] }), ...buttons],
+      })
+    }
+
+    const fit = Math.max(1, Math.min(perRow, Math.floor((Math.max(20, e.props.bodyColumns) - 2) / (CHIP + 1))))
+    const rows: RenderElement[] = []
+    for (let i = 0; i < tracked.length; i += fit) {
+      rows.push(Box({ flexDirection: 'row', columnGap: 1, paddingLeft: 2, children: tracked.slice(i, i + fit).map(chip) }))
+    }
+    const ours = Box({ flexDirection: 'column', children: [bar, ...rows] })
+    return theirs ? Box({ flexDirection: 'column', children: [ours, theirs] }) : ours
   })
 }
