@@ -7,7 +7,7 @@ A Claude Code mod that turns GitHub pull request and issue references in Claude'
 - `#1234`, `owner/repo#1234`, GitHub URLs and the numbers in a table column headed `#`, `PR` or `Issue` get a dot in the state's color: green open, gray draft, purple merged, red closed.
 - Hovering a reference opens a card: state, title, author, age, size, checks, reviews and open threads.
 - Every reference in the card is a link: repo, title references, author, reviewers, files, checks and the failing check's run. Ctrl+click opens it.
-- A plain click on a reference tracks it in a band above the prompt: one chip per PR, three to a row. Ctrl+x tab gives the band the keyboard; ← → move between chips, and one key acts on the focused one: `a` approve (press twice), `r` request changes (opens the PR), `f` re-run the failed checks, `o` open, `x` remove.
+- A plain click on a reference tracks it in a band above the prompt: one chip per PR, three to a row. A click on a key under the chips runs it. For the keyboard, press Ctrl+X, then Tab: ↑ ↓ (or Tab) move between chips, Esc goes back to the prompt, and one key acts on the focused chip: `a` approve (press twice), `r` request changes (opens the PR), `f` re-run the failed checks, `o` open, `x` remove.
 
 The details come from one `gh api graphql` call per repo, cached for 60 seconds.
 

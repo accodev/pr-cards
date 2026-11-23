@@ -835,7 +835,9 @@ export const register: Register = (on, options) => {
     for (let i = 0; i < tracked.length; i += fit) {
       rows.push(Box({ flexDirection: 'row', columnGap: 1, paddingLeft: 2, children: tracked.slice(i, i + fit).map(chip) }))
     }
-    const hint = Text({ color: C.dim, children: [picked ? '  tracked · ←→ move · ctrl+x tab focuses' : '  tracked · click a chip or ctrl+x tab, then ←→ and a key'] })
+    // The keys the engine gives a band: ctrl+x then tab takes the keyboard, ↑↓ and tab move between
+    // controls, esc gives it back. ←→ do nothing here, and a mod cannot bind them.
+    const hint = Text({ color: C.dim, children: ['  tracked · click a key below, or ctrl+x then tab for the keys · ↑↓ move · esc back'] })
     const keyRow = keys.length ? [Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 3, paddingLeft: 2, children: keys })] : []
     const ours = Box({ flexDirection: 'column', children: [hint, ...rows, ...keyRow] })
     return theirs ? Box({ flexDirection: 'column', children: [ours, theirs] }) : ours
