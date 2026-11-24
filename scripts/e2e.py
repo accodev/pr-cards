@@ -222,9 +222,14 @@ try:
             return 1306 if a[0] else 1250
 
         before = picked()
-        proc.write("\x1b[B")  # ↓ moves to the next control
-        time.sleep(1)
-        after = picked()
+        # ↓ moves to the next control: the chip's own × first, then the next chip.
+        after = before
+        for _ in range(3):
+            proc.write("\x1b[B")
+            time.sleep(1)
+            after = picked()
+            if after != before:
+                break
         dump("3b-arrow")
         print("focused after the focus chord:", before, "after ↓:", after)
         moved = before is not None and after is not None and before != after
@@ -245,8 +250,20 @@ try:
         gone = after is not None and chip_at(after) is None and chip_at(1306 if after == 1250 else 1250) is not None
         print("↓ moved the selection:", moved, "x removed it:", gone)
         clicked = clicked and moved and gone
-        # Leave nothing tracked: the first chip is still focused after the removal moves the ring.
-        first = chip_at(1306)
+        # A mouse click on the other chip's × removes it.
+        left = 1306 if after == 1250 else 1250
+        at = chip_at(left)
+        x_clicked = False
+        if at:
+            with lock:
+                row = screen.display[at[1] - 1]
+            col = row.index("×", at[0]) + 1
+            proc.write(f"\x1b[<0;{col};{at[1]}M\x1b[<0;{col};{at[1]}m")
+            time.sleep(2)
+            x_clicked = chip_at(left) is None
+        print("a click on × removed the chip:", x_clicked)
+        clicked = clicked and x_clicked
+        # Leave nothing tracked.
         for _ in range(3):
             if not (chip_at(1306) or chip_at(1250)):
                 break
@@ -269,7 +286,7 @@ try:
     print("dot colors:", sorted(set(dots)))
     # A hollow dot is a reference still loading, a cross one whose lookup failed.
     pending = text().count("○")
-    failed = text().count("✖ ")
+    failed = text().count("✗ ")
     crashed = "crashed" in text()
     print("list dots:", len(dots), "loading:", pending, "failed:", failed, "crashed:", crashed)
     clicked = clicked and not crashed and len(dots) >= 15 and not pending and not failed
@@ -290,7 +307,7 @@ try:
         dump("5-list-hover")
         # #1320's state and checks change on GitHub: only its number is fixed.
         card = "fiskaltrust/market-it #1320" in text()
-        failing_shown = "✖" in text()
+        failing_shown = "✗" in text()
         with lock:
             targets = set(m.decode("utf-8", "replace") for m in re.findall(rb"\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]+)", bytes(raw)))
         pr = "https://github.com/fiskaltrust/market-it/pull/1320"
