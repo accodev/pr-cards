@@ -146,14 +146,22 @@ try:
     # The e2e never presses a, r, f or c: those act on a real PR.
     def chip_at(number):
         for row, line in enumerate(text().split("\n")):
-            if f"#{number}" in line and "×" in line and "tracked" not in line:
+            # A band row starts with a group label, or with its blank space on a group's next rows.
+            band_row = line.startswith(("  needs you", "  waiting", "  done", " " * 12))
+            if f"⬤ #{number} " in line and band_row:
                 return line.index(f"#{number}") + 2, row + 1
         return None
 
     first = chip_at(1306)
     keyrow = "x: remove" in text()
     print("tracked chip and hotkey row:", first, keyrow)
-    clicked = first is not None and keyrow and "crashed" not in text()
+    # The band's title is a link to the repo's pull requests, so the terminal underlines it dotted.
+    # text() takes the lock itself; only the raw bytes are read under it.
+    with lock:
+        linked = b"github.com/fiskaltrust/market-it/pulls" in bytes(raw)
+    titled = "tracked prs" in text() and linked
+    print("title 'tracked prs' links the repo's pulls:", titled)
+    clicked = first is not None and keyrow and titled and "crashed" not in text()
     # Track a second one, focus the band with a click on the first chip, → to the second, x removes it.
     issue = find("⬤ #1250")
     if clicked and issue:
@@ -250,19 +258,6 @@ try:
         gone = after is not None and chip_at(after) is None and chip_at(1306 if after == 1250 else 1250) is not None
         print("↓ moved the selection:", moved, "x removed it:", gone)
         clicked = clicked and moved and gone
-        # A mouse click on the other chip's × removes it.
-        left = 1306 if after == 1250 else 1250
-        at = chip_at(left)
-        x_clicked = False
-        if at:
-            with lock:
-                row = screen.display[at[1] - 1]
-            col = row.index("×", at[0]) + 1
-            proc.write(f"\x1b[<0;{col};{at[1]}M\x1b[<0;{col};{at[1]}m")
-            time.sleep(2)
-            x_clicked = chip_at(left) is None
-        print("a click on × removed the chip:", x_clicked)
-        clicked = clicked and x_clicked
         # Leave nothing tracked.
         for _ in range(3):
             if not (chip_at(1306) or chip_at(1250)):
@@ -286,7 +281,7 @@ try:
     print("dot colors:", sorted(set(dots)))
     # A hollow dot is a reference still loading, a cross one whose lookup failed.
     pending = text().count("○")
-    failed = text().count("✗ ")
+    failed = len(re.findall(r"(?<!\w)x #\d", text()))
     crashed = "crashed" in text()
     print("list dots:", len(dots), "loading:", pending, "failed:", failed, "crashed:", crashed)
     clicked = clicked and not crashed and len(dots) >= 15 and not pending and not failed
@@ -307,7 +302,7 @@ try:
         dump("5-list-hover")
         # #1320's state and checks change on GitHub: only its number is fixed.
         card = "fiskaltrust/market-it #1320" in text()
-        failing_shown = "✗" in text()
+        failing_shown = bool(re.search(r"(?<!\w)x \d+ of \d+ checks|· x ", text()))
         with lock:
             targets = set(m.decode("utf-8", "replace") for m in re.findall(rb"\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]+)", bytes(raw)))
         pr = "https://github.com/fiskaltrust/market-it/pull/1320"
