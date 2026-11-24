@@ -348,6 +348,8 @@ test('names the focus chord the person bound in keybindings.json in the band hin
   const texts = (await band.findAll({ type: 'Text' })).map((t) => String(t.text))
   expect(texts.some((t) => t.includes('or alt+a for the keys'))).toBe(true)
   expect(texts.some((t) => t.includes('ctrl+x'))).toBe(false)
+  // Nothing selected in this session yet: no chip is underlined, so no line changes color mid-chip.
+  expect((await band.findAll({ type: 'Text' })).some((t) => t.props.underline)).toBe(false)
 })
 
 test('leaves a message without references to Claude Code', async ($, on) => {
