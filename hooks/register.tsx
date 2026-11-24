@@ -856,9 +856,10 @@ export const register: Register = (on, options) => {
 
     const { Box, Text, Button, Link } = $.ui.resolve(e)
     const CHIP = 32
-    // Design U2 with W1: every chip underlined in its own colors (the terminal draws an underline in
-    // the text's color, on the chip's own row); the selected one in the theme's suggestion color and
-    // two chips wide, so more of its title shows. The GitHub card holds the rest.
+    // Design U1 with W1: the selected chip in the theme's suggestion color, underlined, and two chips
+    // wide, so more of its title shows; the GitHub card holds the rest. Only it is underlined: a
+    // terminal draws an underline in each character's color, so a chip in several colors would get
+    // a line in several colors.
     const PICKED = 'suggestion'
     const WIDE = 2 * CHIP + 1
     type Run = { text: string; color?: string; bold?: boolean }
@@ -892,7 +893,7 @@ export const register: Register = (on, options) => {
             key: `pr-cards-select-${key}`, label: `select #${t.number}`, plain: true,
             onPress: () => { selected = key; armed = null; $.ui.invalidate('ui.render') },
             children: [
-              ...runs.map((r) => Text({ color: picked ? PICKED : r.color, bold: r.bold, underline: true, children: [r.text] })),
+              ...runs.map((r) => Text({ color: picked ? PICKED : r.color, bold: r.bold, underline: picked, children: [r.text] })),
               Text({ children: [' '] }),
             ],
           }),

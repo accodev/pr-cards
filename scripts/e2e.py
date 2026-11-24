@@ -185,7 +185,7 @@ try:
         time.sleep(1)
         dump("3a-focused")
 
-        # The selected chip is two chips wide, underlined, and its number is not in the link color.
+        # The selected chip is two chips wide, underlined, and its number is in the suggestion color.
         def look(number):
             at = chip_at(number)
             if not at:
@@ -199,7 +199,8 @@ try:
         def picked():
             a, b = look(1306), look(1250)
             print("chips (width, underlined, number color):", a, b)
-            if not a or not b or not (a[1] and b[1]) or a[2] == b[2]:
+            # Only the selected chip is underlined.
+            if not a or not b or a[1] == b[1] or a[2] == b[2]:
                 return None
             return 1306 if a[0] > 40 and b[0] < 40 else 1250 if b[0] > 40 and a[0] < 40 else None
 
