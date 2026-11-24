@@ -236,12 +236,21 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   expect(said).toContain(' lgreen 2d')
   expect(said).toContain(' x')
   expect(said).toContain('waiting   ')
-  const title = texts.find((t) => String(t.text).startsWith(' Tracked PRs'))!
+  const title = texts.find((t) => String(t.text).startsWith(' ▾ Tracked PRs'))!
   expect([title.props.color, title.props.backgroundColor, title.props.bold, String(title.text).length]).toEqual(['inverseText', 'claude', true, 113])
   expect(texts.some((t) => (t !== title && t.props.backgroundColor) || t.props.underline)).toBe(false)
   // 115 body columns: three chips of 33 cells beside the 10-cell label.
   const at = said.indexOf('▎') // then the dot, number, title, author and age, checks, and the space to the chip's end
   expect(said.slice(at, at + 7).join('')).toHaveLength(33)
+  // A click on the bar folds the chips and keys away, leaving the bar with the count; again, back.
+  await band.press({ key: 'pr-cards-fold' })
+  await clock.settle()
+  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeUndefined()
+  expect(await band.find({ key: 'pr-cards-x' })).toBeUndefined()
+  expect((await band.findAll({ type: 'Text' })).some((t) => String(t.text).startsWith(' ▸ Tracked PRs · 1'))).toBe(true)
+  await band.press({ key: 'pr-cards-fold' })
+  await clock.settle()
+  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
   const hotkeys = (await band.findAll({ type: 'Button' })).flatMap((b) => (b.props.hotkey ? [`${b.props.hotkey}: ${b.props.label}`] : []))
   expect(hotkeys).toEqual(['a: approve', 'r: request changes', 'f: re-run failed', 'o: open', 'c: copy link', 'x: remove'])
 

@@ -157,13 +157,27 @@ try:
     print("tracked chip and hotkey row:", first, keyrow)
     # Design P3: "Tracked PRs" on a bar of Claude Code's orange, bold.
     titled = None
+    bar = None
     for row, line in enumerate(text().split("\n")):
-        if line.startswith("   Tracked PRs"):
+        if line.startswith("   ▾ Tracked PRs"):
             with lock:
                 cell = screen.buffer[row][3]
             titled = (cell.bg, cell.bold)
+            bar = row + 1
     print("title 'Tracked PRs' (background, bold):", titled)
     titled = bool(titled and titled[0] not in ("default", "") and titled[1])
+    # A click on the bar folds the chips away (the bar stays, with the count); another brings them back.
+    if bar:
+        proc.write(f"\x1b[<0;10;{bar}M\x1b[<0;10;{bar}m")
+        time.sleep(2)
+        dump("3-folded")
+        folded_ok = chip_at(1306) is None and "▸ Tracked PRs · 1" in text()
+        bar = next((r + 1 for r, l in enumerate(text().split("\n")) if "▸ Tracked PRs" in l), bar)
+        proc.write(f"\x1b[<0;10;{bar}M\x1b[<0;10;{bar}m")
+        time.sleep(2)
+        folded_ok = folded_ok and chip_at(1306) is not None
+        print("a click on the bar folds and unfolds:", folded_ok)
+        titled = titled and folded_ok
     clicked = first is not None and keyrow and titled and "crashed" not in text()
     # Track a second one, focus the band with a click on the first chip, → to the second, x removes it.
     issue = find("⬤ #1250")
