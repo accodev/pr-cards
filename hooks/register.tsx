@@ -25,6 +25,8 @@ type Item = {
   failing?: { name: string; url?: string }[]
   approvedBy?: string[]
   changesBy?: string[]
+  // The users whose review is asked for and not given yet.
+  requested?: string[]
   threads?: { path: string; line: number | null }[]
   files?: { path: string; additions: number; deletions: number }[]
   comments?: number
@@ -59,44 +61,55 @@ const day = (iso?: string) => {
 const cache = new Map<string, Entry>()
 // The session folder's GitHub repo: undefined until asked, null when it has none.
 let cwdRepo: string | null | undefined
-let cwdRepoAsked = false
 const queue = new Map<string, Set<number>>()
 let flushQueued = false
 // The signed-in GitHub user: their own reviews read "you", as in the mockup.
 let viewer = ''
 
-// The PRs and issues a click on a reference tracked, for the band above the prompt. Each session
-// keeps its own list, in the mod's store under `tracked.<session id>`: the store is shared by every
-// session, and one session's list must not show in another. `selected` is the focused chip.
+// The PRs and issues a click on a reference tracked, for the band above the prompt, in the mod's
+// store (shared by every session). With `shareTracked` on, the sessions of one GitHub repo share a
+// list, `tracked.repo.<owner/name>`, its worktrees and clones included; a folder outside git has
+// `tracked.dir.<path>`. Off, each session keeps `tracked.<session id>`. `selected` is the focused chip.
 type Tracked = { repo: string; number: number }
 type SavedList = { at: number; items: Tracked[] }
 let tracked: Tracked[] = []
 let trackedLoaded = false
-let session: string | null = null
+let listKey: string | null = null
+let shareTracked = true
+let listReadAt = 0
 let selected: string | null = null
 // Approving is seen by others on GitHub: the first press arms it, the second sends it.
 let armed: string | null = null
-// A session's saved list goes once the session has been idle this long.
+// A saved list goes once no session has used it for this long.
 const TRACKED_TTL_MS = 14 * 86_400_000
+// Another session may change a shared list: the band reads it again this often.
+const SHARED_READ_MS = 5_000
 
 const isTracked = (t: unknown): t is Tracked => !!t && typeof (t as Tracked).repo === 'string' && typeof (t as Tracked).number === 'number'
+const savedItems = (saved: unknown) => (Array.isArray((saved as SavedList | undefined)?.items) ? (saved as SavedList).items.filter(isTracked) : [])
+
+async function trackedKey($: EngineInterface) {
+  if (!shareTracked) return `tracked.${await $.session.id()}`
+  const repo = await cwdRepoNow($)
+  return repo ? `tracked.repo.${repo}` : `tracked.dir.${await $.session.cwd()}`
+}
 
 function loadTracked($: EngineInterface) {
   if (trackedLoaded) return
   trackedLoaded = true
   void (async () => {
-    session = await $.session.id()
-    const saved = (await $.store.get(`tracked.${session}`)) as SavedList | undefined
-    const earlier = Array.isArray(saved?.items) ? saved.items.filter(isTracked) : []
-    // A click before the list came back is kept, after what the session tracked before.
+    listKey = await trackedKey($)
+    const earlier = savedItems(await $.store.get(listKey))
+    listReadAt = Date.now()
+    // A click before the list came back is kept, after what the list held before.
     const clicked = tracked.filter((t) => !earlier.some((e) => keyFor(e.repo, e.number) === keyFor(t.repo, t.number)))
     tracked = [...earlier, ...clicked]
     if (clicked.length) saveTracked($)
     $.ui.invalidate('ui.render')
-    // Drop the lists of sessions idle past TRACKED_TTL_MS, and the one list 0.4 and 0.5 shared.
+    // Drop the lists idle past TRACKED_TTL_MS, and the one list 0.4 and 0.5 shared.
     for (const key of await $.store.keys()) {
       if (key === 'tracked') await $.store.delete(key)
-      else if (key.startsWith('tracked.') && key !== `tracked.${session}`) {
+      else if (key.startsWith('tracked.') && key !== listKey) {
         const other = (await $.store.get(key)) as SavedList | undefined
         if (!other || typeof other.at !== 'number' || Date.now() - other.at > TRACKED_TTL_MS) await $.store.delete(key)
       }
@@ -104,8 +117,26 @@ function loadTracked($: EngineInterface) {
   })().catch(() => undefined)
 }
 
+// A shared list changes in other sessions too: read it again, at most every SHARED_READ_MS.
+function rereadTracked($: EngineInterface) {
+  if (!shareTracked || !listKey || Date.now() - listReadAt < SHARED_READ_MS) return
+  listReadAt = Date.now()
+  const key = listKey
+  void $.store.get(key).then((saved) => {
+    const items = savedItems(saved)
+    const same = items.length === tracked.length && items.every((t, i) => keyFor(t.repo, t.number) === keyFor(tracked[i]!.repo, tracked[i]!.number))
+    if (same || key !== listKey) return
+    tracked = items
+    if (selected && !tracked.some((t) => keyFor(t.repo, t.number) === selected)) selected = null
+    $.ui.invalidate('ui.render')
+  }).catch(() => undefined)
+}
+
 function saveTracked($: EngineInterface) {
-  if (session) void $.store.set(`tracked.${session}`, { at: Date.now(), items: tracked } satisfies SavedList).catch(() => undefined)
+  if (listKey) {
+    listReadAt = Date.now()
+    void $.store.set(listKey, { at: Date.now(), items: tracked } satisfies SavedList).catch(() => undefined)
+  }
 }
 
 function track($: EngineInterface, repo: string, number: number) {
@@ -176,52 +207,6 @@ async function copyLink($: EngineInterface, item: Item, surface: RenderSurface) 
   }
   await $.ui.copy({ text, surface }).catch(() => undefined)
   $.ui.toast(`copied ${label} as plain text`)
-}
-
-// The chord that focuses the band is the person's to rebind (`abovePrompt:focus` in keybindings.json),
-// and the mod API has no call that tells it: the hint reads the file itself, again at most every 30 s.
-const FOCUS_DEFAULT = 'ctrl+x tab'
-let focusChord: string | null = FOCUS_DEFAULT
-let focusReadAt = -Infinity
-let focusReading = false
-
-function focusChordFrom(json: string): string | null {
-  const chords = [FOCUS_DEFAULT]
-  let file: unknown
-  try { file = JSON.parse(json) } catch { return FOCUS_DEFAULT }
-  const blocks = (file as { bindings?: unknown })?.bindings
-  if (!Array.isArray(blocks)) return FOCUS_DEFAULT
-  for (const b of blocks as { context?: unknown; bindings?: Record<string, unknown> }[]) {
-    if (b?.context !== 'Chat' || !b.bindings || typeof b.bindings !== 'object') continue
-    for (const [chord, action] of Object.entries(b.bindings)) {
-      // A user binding of the same keys replaces the default's action; null unbinds it.
-      const at = chords.indexOf(chord)
-      if (at >= 0) chords.splice(at, 1)
-      if (action === 'abovePrompt:focus') chords.push(chord)
-    }
-  }
-  return chords.length ? chords[chords.length - 1] ?? null : null
-}
-
-const describeChord = (chord: string) => chord.trim().split(/\s+/).join(' then ')
-
-async function refreshFocusChord($: EngineInterface) {
-  if (focusReading || Date.now() - focusReadAt < 30_000) return
-  focusReading = true
-  try {
-    const dir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${(await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? ''}/.claude`
-    const text = await $.fs.read(`${dir}/keybindings.json`).catch(() => '')
-    const chord = typeof text === 'string' && text ? focusChordFrom(text) : FOCUS_DEFAULT
-    if (chord !== focusChord) {
-      focusChord = chord
-      $.ui.invalidate('ui.render')
-    }
-  } catch {
-    // No environment or file access here: the default chord stays in the hint.
-  } finally {
-    focusReadAt = Date.now()
-    focusReading = false
-  }
 }
 
 async function act($: EngineInterface, argv: string[], done: string) {
@@ -356,13 +341,21 @@ function blockRefs(b: Block): Ref[] {
 
 // ---------- Loading from GitHub ----------
 
+let cwdRepoAsking: Promise<string | null> | null = null
+
 function askCwdRepo($: EngineInterface) {
-  if (cwdRepoAsked) return
-  cwdRepoAsked = true
-  void $.process.run(['gh', 'repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { timeoutMs: 15_000 })
-    .then((out) => { cwdRepo = out.exitCode === 0 && out.stdout.trim() ? out.stdout.trim() : null })
-    .catch(() => { cwdRepo = null })
+  void cwdRepoNow($)
+}
+
+// The session folder's GitHub repo, asked of gh once.
+function cwdRepoNow($: EngineInterface): Promise<string | null> {
+  if (cwdRepo !== undefined) return Promise.resolve(cwdRepo)
+  if (cwdRepoAsking) return cwdRepoAsking
+  cwdRepoAsking = $.process.run(['gh', 'repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { timeoutMs: 15_000 })
+    .then((out) => (cwdRepo = out.exitCode === 0 && out.stdout.trim() ? out.stdout.trim() : null))
+    .catch(() => (cwdRepo = null))
     .finally(() => $.ui.invalidate('ui.render'))
+  return cwdRepoAsking
 }
 
 function want($: EngineInterface, ref: Ref) {
@@ -388,6 +381,7 @@ const FIELDS = `
     statusCheckRollup { contexts(first: 100) { totalCount checkRunCountsByState { state count } statusContextCountsByState { state count }
       nodes { __typename ... on CheckRun { name conclusion detailsUrl } ... on StatusContext { context state targetUrl } } } }
     latestReviews(first: 20) { nodes { state author { login } } }
+    reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
     reviewThreads(first: 100) { nodes { isResolved path line } }
     files(first: 4) { nodes { path additions deletions } } }
   ... on Issue { number title url state stateReason author { login } comments { totalCount } createdAt closedAt }`
@@ -437,6 +431,7 @@ type Raw = {
     }
   } | null
   latestReviews?: { nodes: { state: string; author?: { login: string } | null }[] }
+  reviewRequests?: { nodes: { requestedReviewer?: { login?: string } | null }[] }
   reviewThreads?: { nodes: { isResolved: boolean; path: string; line: number | null }[] }
   files?: { nodes: { path: string; additions: number; deletions: number }[] }
   comments?: { totalCount: number }
@@ -476,12 +471,31 @@ function toItem(repo: string, raw: Raw): Item {
     additions: raw.additions, deletions: raw.deletions, changedFiles: raw.changedFiles,
     review: raw.reviewDecision ?? undefined, checks: { ok, failed, pending: Math.max(0, total - ok - failed), total }, failing,
     approvedBy: by('APPROVED'), changesBy: by('CHANGES_REQUESTED'),
+    requested: (raw.reviewRequests?.nodes ?? []).flatMap((r) => r.requestedReviewer?.login ?? []),
     threads: (raw.reviewThreads?.nodes ?? []).filter((t) => !t.isResolved).map((t) => ({ path: t.path, line: t.line })),
     files: raw.files?.nodes ?? [],
   }
 }
 
 const color = (item: Item) => STATE_COLOR[item.state] ?? C.dim
+
+// `2d`, `5h`, `20m`: how long ago, for a chip.
+function age(iso?: string, now = Date.now()) {
+  if (!iso) return ''
+  const minutes = Math.max(0, Math.round((now - Date.parse(iso)) / 60_000))
+  return minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`
+}
+
+// The band's group: 0 needs you (your review is asked for, or your PR fails its checks or got
+// changes requested), 1 waiting (open, or not loaded yet), 2 done (merged or closed).
+function groupOf(item?: Item) {
+  if (!item) return 1
+  if (item.state !== 'OPEN' && item.state !== 'DRAFT') return 2
+  if (!viewer) return 1
+  if (item.requested?.includes(viewer)) return 0
+  if (item.author === viewer && (item.checks?.failed || item.review === 'CHANGES_REQUESTED')) return 0
+  return 1
+}
 const short = (url: string) => url.replace(/^https:\/\//, '')
 
 // ---------- Drawing ----------
@@ -492,6 +506,8 @@ export const register: Register = (on, options) => {
   // The band of tracked PRs above the prompt, on unless the setting says false.
   const band = options.trackedBand !== false && String(options.trackedBand ?? 'true').toLowerCase() !== 'false'
   const perRow = Math.max(1, Math.min(6, Math.round(Number(options.bandPerRow) || 3)))
+  // One tracked list per repo (or folder) unless the setting says false.
+  shareTracked = options.shareTracked !== false && String(options.shareTracked ?? 'true').toLowerCase() !== 'false'
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const parsed = blocks(e.props.text)
     const refs = parsed.flatMap(blockRefs)
@@ -851,40 +867,42 @@ export const register: Register = (on, options) => {
     const theirs = await next(e)
     if (!band) return theirs
     loadTracked($)
+    rereadTracked($)
     if (!tracked.length || e.props.hasSurvey) return theirs
     for (const t of tracked) want($, { repo: t.repo, number: t.number, label: '' })
 
     const { Box, Text, Button, Link } = $.ui.resolve(e)
-    const CHIP = 32
-    // Design U1 with W1: the selected chip in the theme's suggestion color, underlined, and two chips
-    // wide, so more of its title shows; the GitHub card holds the rest. Only it is underlined: a
-    // terminal draws an underline in each character's color, so a chip in several colors would get
-    // a line in several colors.
-    const PICKED = 'suggestion'
-    const WIDE = 2 * CHIP + 1
+    // Design G1: chips in groups (needs you, waiting, done), a dim label before each group's first
+    // row; a ▎ in the theme's suggestion color marks the selected chip. No fill or underline: a
+    // terminal draws an underline in each character's color.
+    const LABEL = 10
+    const columns = Math.max(40, e.props.bodyColumns) - 2
+    // `perRow` chips share what the label leaves, each with a cell of gap: 33 cells in 120 columns.
+    const CHIP = Math.max(24, Math.min(44, Math.floor((columns - LABEL) / perRow) - 1))
     type Run = { text: string; color?: string; bold?: boolean }
 
-    const chip = (t: Tracked, w: number) => {
+    const chip = (t: Tracked) => {
       const key = keyFor(t.repo, t.number)
       const entry = cache.get(key)
       const item = entry?.item
-      const picked = selected === key
       const runs: Run[] = []
-      if (!item) runs.push({ text: ` ${entry?.error ? '✖' : '○'} `, color: entry?.error ? C.closed : C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
+      if (!item) runs.push({ text: `${entry?.error ? '✖' : '○'} `, color: entry?.error ? C.closed : C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
       else {
         const c = item.checks
         const tail: Run[] = [
-          ...(c?.total ? [{ text: ` ${c.failed ? '✖' : c.pending ? '●' : '✔'} ${c.ok}/${c.total}`, color: c.failed ? C.closed : c.pending ? C.warn : C.open }] : []),
-          ...(item.changesBy?.length ? [{ text: ' ●', color: C.warn }] : item.approvedBy?.length ? [{ text: ' ✔', color: C.open }] : []),
+          // A long login would eat the title: ten cells at most.
+          { text: ` ${item.author.length > 10 ? `${item.author.slice(0, 9)}…` : item.author} ${age(item.created)}`, color: C.dim },
+          ...(c?.total ? [{ text: ` ${c.failed ? '✖' : c.pending ? '●' : '✔'}`, color: c.failed ? C.closed : c.pending ? C.warn : C.open }] : []),
         ]
         const head = `#${t.number} `
-        // The title takes what the chip has left after the dot, number, checks, review and the ×.
-        const room = Math.max(4, w - 3 - head.length - tail.reduce((n, r) => n + r.text.length, 0) - 3)
+        // The title takes what the chip has left after the marker, dot, number, author, age, checks and ×.
+        const room = Math.max(4, CHIP - 3 - head.length - tail.reduce((n, r) => n + r.text.length, 0) - 2)
         const title = item.title.length > room ? `${item.title.slice(0, room - 1)}…` : item.title
-        runs.push({ text: ` ${DOT} `, color: color(item) }, { text: head, color: C.link, bold: true }, { text: title }, ...tail)
+        runs.push({ text: `${DOT} `, color: color(item) }, { text: head, color: C.link, bold: true }, { text: title }, ...tail)
       }
-      const used = runs.reduce((n, r) => n + r.text.length, 0)
-      runs.push({ text: ' '.repeat(Math.max(1, w - 3 - used)) }, { text: '×', color: C.dim })
+      const used = 1 + runs.reduce((n, r) => n + r.text.length, 0)
+      runs.push({ text: ' '.repeat(Math.max(1, CHIP - 1 - used)) }, { text: '×', color: C.dim })
+      const edge = selected === key ? { text: '▎', color: 'suggestion' } : { text: ' ' }
       return Box({
         key: `pr-cards-chip-${key}`, flexDirection: 'row', flexShrink: 0,
         children: [
@@ -892,10 +910,7 @@ export const register: Register = (on, options) => {
           Button({
             key: `pr-cards-select-${key}`, label: `select #${t.number}`, plain: true,
             onPress: () => { selected = key; armed = null; $.ui.invalidate('ui.render') },
-            children: [
-              ...runs.map((r) => Text({ color: picked ? PICKED : r.color, bold: r.bold, underline: picked, children: [r.text] })),
-              Text({ children: [' '] }),
-            ],
+            children: [edge, ...runs].map((r) => Text({ color: r.color, bold: 'bold' in r ? r.bold : undefined, children: [r.text] })),
           }),
         ],
       })
@@ -936,37 +951,22 @@ export const register: Register = (on, options) => {
       keys.push(hotkey('x', 'remove', () => untrack($, key)))
     }
 
-    // Rows fill left to right: `perRow` chips at most, the selected one counting as two, and no
-    // wider than the band. Without room for a wide chip the selected one keeps the normal width.
-    const columns = Math.max(20, e.props.bodyColumns) - 2
-    const wide = WIDE <= columns
+    // Each group fills rows of `perRow` chips; only its first row carries the label.
+    const groups: [string, Tracked[]][] = [['needs you', []], ['waiting', []], ['done', []]]
+    for (const t of tracked) groups[groupOf(cache.get(keyFor(t.repo, t.number))?.item)]![1].push(t)
     const rows: RenderElement[] = []
-    let line: RenderElement[] = []
-    let slots = 0
-    let width = 0
-    for (const t of tracked) {
-      const w = wide && keyFor(t.repo, t.number) === selected ? WIDE : CHIP
-      const cost = w === WIDE ? 2 : 1
-      if (line.length && (slots + cost > perRow || width + w > columns)) {
-        rows.push(Box({ flexDirection: 'row', columnGap: 1, paddingLeft: 2, children: line }))
-        line = []
-        slots = 0
-        width = 0
+    for (const [name, list] of groups) {
+      for (let i = 0; i < list.length; i += perRow) {
+        rows.push(Box({
+          flexDirection: 'row', paddingLeft: 2,
+          children: [
+            Text({ color: C.dim, children: [(i ? '' : name).padEnd(LABEL)] }),
+            Box({ flexDirection: 'row', columnGap: 1, children: list.slice(i, i + perRow).map(chip) }),
+          ],
+        }))
       }
-      line.push(chip(t, w))
-      slots += cost
-      width += w + 1
     }
-    if (line.length) rows.push(Box({ flexDirection: 'row', columnGap: 1, paddingLeft: 2, children: line }))
-    // The keys the engine gives a band: the focus chord takes the keyboard, ↑↓ and tab move between
-    // controls, esc gives it back. ←→ do nothing here, and a mod cannot bind them.
-    void refreshFocusChord($)
-    const hint = Text({
-      color: C.dim,
-      children: [focusChord
-        ? `  tracked · click a key below, or ${describeChord(focusChord)} for the keys · ↑↓ move · esc back`
-        : '  tracked · click a key below'],
-    })
+    const hint = Text({ color: C.dim, children: ['  tracked'] })
     const keyRow = keys.length ? [Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 3, paddingLeft: 2, children: keys })] : []
     const ours = Box({ flexDirection: 'column', children: [hint, ...rows, ...keyRow] })
     return theirs ? Box({ flexDirection: 'column', children: [ours, theirs] }) : ours

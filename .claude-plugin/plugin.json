@@ -1,6 +1,6 @@
 {
   "name": "pr-cards",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "license": "MIT",
   "description": "GitHub pull request chips with hover cards in the Claude Code transcript.",
   "userConfig": {
@@ -19,8 +19,14 @@
     "bandPerRow": {
       "type": "number",
       "title": "Tracked PRs per row",
-      "description": "How many tracked PRs fit on one row of the band, 1 to 6; more start a new row.",
+      "description": "How many tracked PRs fit on one row of a group in the band, 1 to 6; more start a new row.",
       "default": 3
+    },
+    "shareTracked": {
+      "type": "boolean",
+      "title": "Share tracked PRs per repo",
+      "description": "Sessions in the same GitHub repo (its worktrees too), or the same folder outside git, show one tracked list. Off: each session keeps its own.",
+      "default": true
     }
   }
 }

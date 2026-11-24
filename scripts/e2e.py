@@ -163,13 +163,30 @@ try:
         first = chip_at(1306)
         proc.write(f"\x1b[<0;{first[0]};{first[1]}M\x1b[<0;{first[0]};{first[1]}m")  # selects the first chip
         time.sleep(1)
-        # The band hint names the focus chord the person bound (keybindings.json); type that one.
-        import re
-        named = re.search(r"or (.+?) for the keys", text())
+        # The band's focus chord: the last Chat binding of abovePrompt:focus in keybindings.json,
+        # else Claude Code's default, ctrl+x tab.
+        import json
+        import pathlib
+
+        def focus_chord():
+            chord = "ctrl+x tab"
+            try:
+                file = json.loads((pathlib.Path.home() / ".claude" / "keybindings.json").read_text(encoding="utf-8"))
+                for block in file.get("bindings", []):
+                    if block.get("context") != "Chat":
+                        continue
+                    for keys, action in block.get("bindings", {}).items():
+                        if action == "abovePrompt:focus":
+                            chord = keys
+                        elif keys == chord:
+                            chord = None
+            except (OSError, ValueError):
+                pass
+            return chord
 
         def keys_of(chord):
             out = ""
-            for part in chord.split(" then "):
+            for part in chord.split(" "):
                 *mods, key = part.split("+")
                 key = {"tab": "\t", "enter": "\r", "space": " "}.get(key, key)
                 if "ctrl" in mods and len(key) == 1 and key.isalpha():
@@ -179,13 +196,14 @@ try:
                 out += key
             return out
 
-        focus = keys_of(named.group(1)) if named else "\x18\t"
-        print("hint names the focus chord:", named.group(1) if named else None)
+        chord = focus_chord()
+        focus = keys_of(chord) if chord else "\x18\t"
+        print("focus chord from keybindings.json:", chord)
         proc.write(focus)  # the band takes the keyboard
         time.sleep(1)
         dump("3a-focused")
 
-        # The selected chip is two chips wide, underlined, and its number is in the suggestion color.
+        # Design G1: the selected chip starts with a ▎ (three cells before its #), no chip is underlined.
         def look(number):
             at = chip_at(number)
             if not at:
@@ -193,16 +211,15 @@ try:
             with lock:
                 row = screen.display[at[1] - 1]
                 cell = screen.buffer[at[1] - 1][at[0] - 1]
-            width = row.index("×", at[0]) - at[0]
-            return width, cell.underscore, cell.fg
+            start = at[0] - 2  # the 0-based column of the #
+            return row[start - 3] == "▎", cell.underscore, row[max(0, start - 14):start + 30]
 
         def picked():
             a, b = look(1306), look(1250)
-            print("chips (width, underlined, number color):", a, b)
-            # Only the selected chip is underlined.
-            if not a or not b or a[1] == b[1] or a[2] == b[2]:
+            print("chips (marked, underlined, text):", a, b)
+            if not a or not b or a[1] or b[1] or a[0] == b[0]:
                 return None
-            return 1306 if a[0] > 40 and b[0] < 40 else 1250 if b[0] > 40 and a[0] < 40 else None
+            return 1306 if a[0] else 1250
 
         before = picked()
         proc.write("\x1b[B")  # ↓ moves to the next control
