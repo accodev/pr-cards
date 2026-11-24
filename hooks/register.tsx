@@ -600,15 +600,15 @@ export const register: Register = (on, options) => {
       ]
       if (c.total) {
         rows.push([
-          seg('✔', C.open), seg(' '), linked(`${c.ok} of ${c.total} checks`, `${item.url}/checks`),
+          seg('✓', C.open), seg(' '), linked(`${c.ok} of ${c.total} checks`, `${item.url}/checks`),
           ...(item.failing?.length
-            ? [seg(' · '), seg('✖ ', C.closed), linked(item.failing[0]!.name, item.failing[0]!.url, C.closed), ...(item.failing.length > 1 ? [seg(` +${item.failing.length - 1}`, C.closed)] : [])]
+            ? [seg(' · '), seg('✗ ', C.closed), linked(item.failing[0]!.name, item.failing[0]!.url, C.closed), ...(item.failing.length > 1 ? [seg(` +${item.failing.length - 1}`, C.closed)] : [])]
             : []),
           ...(c.pending ? [seg(' · '), seg(`● ${c.pending} running`, C.warn)] : []),
         ])
       }
       const reviews: Seg[] = []
-      if (item.approvedBy?.length) reviews.push(seg('✔', C.open), seg(' approved by '), ...people(item.approvedBy))
+      if (item.approvedBy?.length) reviews.push(seg('✓', C.open), seg(' approved by '), ...people(item.approvedBy))
       if (item.changesBy?.length) reviews.push(...(reviews.length ? [seg(' · ')] : []), seg('● changes requested by ', C.warn), ...people(item.changesBy, C.warn))
       rows.push(reviews.length ? reviews : [seg(REVIEW_WORD[item.review ?? ''] ?? 'no reviews yet', C.dim)])
       if (item.threads?.length) rows.push([linked(`${item.threads.length} open review thread${item.threads.length === 1 ? '' : 's'}`, item.url)])
@@ -649,12 +649,12 @@ export const register: Register = (on, options) => {
       // Your own review reads as the mockup says it, short enough to keep the footer on one row.
       else if (item.changesBy?.length === 1 && item.changesBy[0] === viewer) foot.push(seg('● you requested changes', C.warn))
       else if (item.changesBy?.length) foot.push(seg('● changes requested by ', C.warn), ...people(item.changesBy, C.warn))
-      else if (item.approvedBy?.length === 1 && item.approvedBy[0] === viewer) foot.push(seg('✔ you approved', C.open))
-      else if (item.approvedBy?.length) foot.push(seg('✔ approved by ', C.open), ...people(item.approvedBy, C.open))
+      else if (item.approvedBy?.length === 1 && item.approvedBy[0] === viewer) foot.push(seg('✓ you approved', C.open))
+      else if (item.approvedBy?.length) foot.push(seg('✓ approved by ', C.open), ...people(item.approvedBy, C.open))
       else foot.push(seg(REVIEW_WORD[item.review ?? ''] ?? 'no reviews yet', C.dim))
       const c = item.checks
       if (!c?.total) return popup([...rows, [], foot])
-      const checks = linked(`${c.failed ? '✖' : '✔'} ${c.ok} of ${c.total} checks`, `${item.url}/checks`, c.failed ? C.closed : C.open)
+      const checks = linked(`${c.failed ? '✗' : '✓'} ${c.ok} of ${c.total} checks`, `${item.url}/checks`, c.failed ? C.closed : C.open)
       // A long login would wrap the checks in the middle: then they take a row of their own.
       const fits = foot.reduce((n, s) => n + s.text.length, 0) + 3 + checks.text.length <= INNER
       return popup([...rows, [], ...(fits ? [[...foot, seg(' · ', C.dim), checks]] : [foot, [checks]])])
@@ -667,7 +667,7 @@ export const register: Register = (on, options) => {
       if (entry?.missing) return span(ref.label)
       const item = entry?.item
       // A gray filled dot is a draft; loading is hollow and a failed lookup a cross, so neither reads as a state.
-      const dot = item ? span(`${DOT} `, color(item)) : entry?.error ? span('✖ ', C.closed) : span('○ ', C.dim)
+      const dot = item ? span(`${DOT} `, color(item)) : entry?.error ? span('✗ ', C.closed) : span('○ ', C.dim)
       const label = item
         ? Markdown({
             key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})`,
@@ -851,9 +851,10 @@ export const register: Register = (on, options) => {
 
   // Arrows (and a click) move the band's focus ring between chips: the focused chip is the selected one.
   on('ui.focus', ($, e, next) => {
-    const prefix = 'pr-cards-select-'
-    if (band && e.plugin === 'pr-cards' && e.element?.startsWith(prefix)) {
-      const key = e.element.slice(prefix.length)
+    // The focus on a chip's × keeps that chip selected.
+    const prefix = /^pr-cards-(?:select|remove)-/.exec(e.element ?? '')?.[0]
+    if (band && e.plugin === 'pr-cards' && prefix) {
+      const key = e.element!.slice(prefix.length)
       if (selected !== key) {
         selected = key
         armed = null
@@ -888,13 +889,13 @@ export const register: Register = (on, options) => {
       const entry = cache.get(key)
       const item = entry?.item
       const runs: Run[] = []
-      if (!item) runs.push({ text: `${entry?.error ? '✖' : '○'} `, color: entry?.error ? C.closed : C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
+      if (!item) runs.push({ text: `${entry?.error ? '✗' : '○'} `, color: entry?.error ? C.closed : C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
       else {
         const c = item.checks
         const tail: Run[] = [
           // A long login would eat the title: ten cells at most.
           { text: ` ${item.author.length > 10 ? `${item.author.slice(0, 9)}…` : item.author} ${age(item.created)}`, color: C.dim },
-          ...(c?.total ? [{ text: ` ${c.failed ? '✖' : c.pending ? '●' : '✔'}`, color: c.failed ? C.closed : c.pending ? C.warn : C.open }] : []),
+          ...(c?.total ? [{ text: ` ${c.failed ? '✗' : c.pending ? '●' : '✓'}`, color: c.failed ? C.closed : c.pending ? C.warn : C.open }] : []),
         ]
         const head = `#${t.number} `
         // The title takes what the chip has left after the marker, dot, number, author, age, checks and ×.
@@ -903,16 +904,21 @@ export const register: Register = (on, options) => {
         runs.push({ text: `${DOT} `, color: color(item) }, { text: head, color: C.link, bold: true }, { text: title }, ...tail)
       }
       const used = 1 + runs.reduce((n, r) => n + r.text.length, 0)
-      runs.push({ text: ' '.repeat(Math.max(1, CHIP - 1 - used)) }, { text: '×', color: C.dim })
+      runs.push({ text: ' '.repeat(Math.max(1, CHIP - 1 - used)) })
       const edge = selected === key ? { text: '▎', color: 'suggestion' } : { text: ' ' }
       return Box({
         key: `pr-cards-chip-${key}`, flexDirection: 'row', flexShrink: 0,
         children: [
-          // One focus stop per chip, so ↑ ↓ step chip by chip; the × marks what x removes.
           Button({
             key: `pr-cards-select-${key}`, label: `select #${t.number}`, plain: true,
             onPress: () => { selected = key; armed = null; $.ui.invalidate('ui.render') },
             children: [edge, ...runs].map((r) => Text({ color: r.color, bold: 'bold' in r ? r.bold : undefined, children: [r.text] })),
+          }),
+          // A press reports no cell, so the × is a Button of its own: a click on it removes the chip.
+          Button({
+            key: `pr-cards-remove-${key}`, label: `remove #${t.number}`, plain: true,
+            onPress: () => untrack($, key),
+            children: [Text({ color: C.dim, children: ['×'] })],
           }),
         ],
       })

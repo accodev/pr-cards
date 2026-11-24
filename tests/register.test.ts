@@ -152,7 +152,7 @@ test('leaves row numbers and numbers GitHub does not know as plain text', async 
   const texts = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
   expect(texts.filter((t) => t.startsWith('⬤'))).toHaveLength(1) // only #1319
   // One cross only: #1319's card lists its failing check; #999 gets no failed-lookup cross.
-  expect(texts.filter((t) => t.startsWith('✖'))).toHaveLength(1)
+  expect(texts.filter((t) => t.startsWith('✗'))).toHaveLength(1)
 })
 
 test('draws the GitHub-style card when cardStyle is github', { options: { cardStyle: 'github' } }, async ($, on) => {
@@ -173,7 +173,7 @@ test('draws the GitHub-style card when cardStyle is github', { options: { cardSt
   expect(texts).toContain('opened by ') // the footer opens with the author, as design 9c
   expect(texts).toContain('@lgreen')
   expect(texts).toContain('● you requested changes')
-  expect(texts).toContain('✖ 1 of 2 checks')
+  expect(texts).toContain('✗ 1 of 2 checks')
   // None of the full card's badge, size or thread rows.
   expect(texts.some((t) => t === ' Open ' || t.includes('open review thread') || t.includes('files'))).toBe(false)
   const links = (await ui.findAll({ type: 'Link' })).map((l) => l.props.href)
@@ -188,8 +188,8 @@ test('moves the checks to their own row when a long login fills the GitHub-style
   await clock.settle()
   await clock.settle()
   const texts = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
-  expect(texts).toContain('✔ you approved')
-  expect(texts).toContain('✖ 1 of 2 checks') // whole, on its own row
+  expect(texts).toContain('✓ you approved')
+  expect(texts).toContain('✗ 1 of 2 checks') // whole, on its own row
 })
 
 test('a click tracks a PR in the band above the prompt, with actions for the selected chip', async ($, on) => {
@@ -234,7 +234,7 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   expect(texts.find((t) => String(t.text) === '▎')?.props.color).toBe('suggestion')
   expect(said).toContain('#1319 ')
   expect(said).toContain(' lgreen 2d')
-  expect(said).toContain(' ✖')
+  expect(said).toContain(' ✗')
   expect(said).toContain('waiting   ')
   expect(said).toContain('  tracked')
   expect(texts.some((t) => t.props.backgroundColor || t.props.underline)).toBe(false)
@@ -363,9 +363,8 @@ test('shares tracked PRs per repo and groups them: needs you, waiting, done', as
   expect(at('#1250 ')).toBeLessThan(at('done      '))
   expect(at('done      ')).toBeLessThan(at('#1307 '))
 
-  // x in this session changes the repo's list, which every session of the repo reads.
-  await band.press({ key: 'pr-cards-select-acme/pos-api#1250' })
-  await band.press({ key: 'pr-cards-x' })
+  // A click on a chip's × removes it, from the repo's list every session of the repo reads.
+  await band.press({ key: 'pr-cards-remove-acme/pos-api#1250' })
   await clock.settle()
   expect((store['tracked.repo.acme/pos-api'] as { items: { number: number }[] }).items.map((t) => t.number)).toEqual([1307, 1319, 1400])
   expect(store['tracked.session-b']).toBeUndefined()
