@@ -155,12 +155,15 @@ try:
     first = chip_at(1306)
     keyrow = "x: remove" in text()
     print("tracked chip and hotkey row:", first, keyrow)
-    # The band's title is a link to the repo's pull requests, so the terminal underlines it dotted.
-    # text() takes the lock itself; only the raw bytes are read under it.
-    with lock:
-        linked = b"github.com/fiskaltrust/market-it/pulls" in bytes(raw)
-    titled = "tracked prs" in text() and linked
-    print("title 'tracked prs' links the repo's pulls:", titled)
+    # Design P3: "Tracked PRs" on a bar of Claude Code's orange, bold.
+    titled = None
+    for row, line in enumerate(text().split("\n")):
+        if line.startswith("   Tracked PRs"):
+            with lock:
+                cell = screen.buffer[row][3]
+            titled = (cell.bg, cell.bold)
+    print("title 'Tracked PRs' (background, bold):", titled)
+    titled = bool(titled and titled[0] not in ("default", "") and titled[1])
     clicked = first is not None and keyrow and titled and "crashed" not in text()
     # Track a second one, focus the band with a click on the first chip, → to the second, x removes it.
     issue = find("⬤ #1250")

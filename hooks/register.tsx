@@ -969,12 +969,11 @@ export const register: Register = (on, options) => {
         }))
       }
     }
-    // The title is a link, so the terminal draws it with its dotted underline: the repo's pull
-    // requests, or the signed-in user's outside a repo.
-    const pulls = cwdRepo ? `https://github.com/${cwdRepo}/pulls` : 'https://github.com/pulls'
+    // Design P3: the title on a bar of Claude Code's orange across the band, bold, in the theme's
+    // inverse text color. A Box's background leaves empty cells bare, so the text runs the width.
     const hint = Box({
       flexDirection: 'row', paddingLeft: 2,
-      children: [Link({ href: pulls, children: [Text({ color: C.dim, children: ['tracked prs'] })] })],
+      children: [Text({ color: 'inverseText', backgroundColor: 'claude', bold: true, children: [' Tracked PRs'.padEnd(columns)] })],
     })
     const keyRow = keys.length ? [Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 3, paddingLeft: 2, children: keys })] : []
     const ours = Box({ flexDirection: 'column', children: [hint, ...rows, ...keyRow] })
