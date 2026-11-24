@@ -80,6 +80,8 @@ let listReadAt = 0
 let selected: string | null = null
 // Approving is seen by others on GitHub: the first press arms it, the second sends it.
 let armed: string | null = null
+// The band shows only its title bar, for this session, after a click on it.
+let folded = false
 // A saved list goes once no session has used it for this long.
 const TRACKED_TTL_MS = 14 * 86_400_000
 // Another session may change a shared list: the band reads it again this often.
@@ -971,12 +973,19 @@ export const register: Register = (on, options) => {
     }
     // Design P3: the title on a bar of Claude Code's orange across the band, bold, in the theme's
     // inverse text color. A Box's background leaves empty cells bare, so the text runs the width.
+    // A click on it folds the chips away and back: the engine's own collapse (ctrl+x ctrl+a, [-])
+    // hides the whole band, this bar included.
+    const label = folded ? ` ▸ Tracked PRs · ${tracked.length}` : ' ▾ Tracked PRs'
     const hint = Box({
       flexDirection: 'row', paddingLeft: 2,
-      children: [Text({ color: 'inverseText', backgroundColor: 'claude', bold: true, children: [' Tracked PRs'.padEnd(columns)] })],
+      children: [Button({
+        key: 'pr-cards-fold', label: folded ? 'show the tracked PRs' : 'hide the tracked PRs', plain: true,
+        onPress: () => { folded = !folded; $.ui.invalidate('ui.render') },
+        children: [Text({ color: 'inverseText', backgroundColor: 'claude', bold: true, children: [label.padEnd(columns)] })],
+      })],
     })
     const keyRow = keys.length ? [Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 3, paddingLeft: 2, children: keys })] : []
-    const ours = Box({ flexDirection: 'column', children: [hint, ...rows, ...keyRow] })
+    const ours = Box({ flexDirection: 'column', children: folded ? [hint] : [hint, ...rows, ...keyRow] })
     return theirs ? Box({ flexDirection: 'column', children: [ours, theirs] }) : ours
   })
 }
