@@ -391,6 +391,26 @@ test('a folder outside git keeps one tracked list for its sessions', async ($, o
   await clock.settle()
   expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
 })
+
+test('sends the query on stdin, so 40 references fit past the Windows command-line limit', async ($, on) => {
+  const clock = mock.clock(on)
+  const calls: { argv: string[]; stdin: string }[] = []
+  on('process.run', ($, e) => {
+    calls.push({ argv: [...e.argv], stdin: String(e.init?.stdin ?? '') })
+    return e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR } } }))
+  })
+  const numbers = Array.from({ length: 40 }, (_, i) => 1300 + i)
+  await $.ui.mount(message(numbers.map((n) => `#${n}`).join(', ')))
+  await clock.settle()
+  await clock.settle()
+  const graphql = calls.filter((c) => c.argv[1] === 'api')
+  expect(graphql).toHaveLength(1)
+  expect(graphql[0]!.argv).toEqual(['gh', 'api', 'graphql', '--input', '-'])
+  const query = (JSON.parse(graphql[0]!.stdin) as { query: string }).query
+  expect(query.length).toBeGreaterThan(32_767)
+  expect(numbers.every((n) => query.includes(`n${n}: issueOrPullRequest(number: ${n})`))).toBe(true)
+})
+
 test('leaves a message without references to Claude Code', async ($, on) => {
   on('process.run', () => {
     throw new Error('gh must not run')
