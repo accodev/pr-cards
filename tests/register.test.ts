@@ -236,8 +236,9 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   expect(said).toContain(' lgreen 2d')
   expect(said).toContain(' x')
   expect(said).toContain('waiting   ')
-  expect(said).toContain('tracked prs')
-  expect(texts.some((t) => t.props.backgroundColor || t.props.underline)).toBe(false)
+  const title = texts.find((t) => String(t.text).startsWith(' Tracked PRs'))!
+  expect([title.props.color, title.props.backgroundColor, title.props.bold, String(title.text).length]).toEqual(['inverseText', 'claude', true, 113])
+  expect(texts.some((t) => (t !== title && t.props.backgroundColor) || t.props.underline)).toBe(false)
   // 115 body columns: three chips of 33 cells beside the 10-cell label.
   const at = said.indexOf('▎') // then the dot, number, title, author and age, checks, and the space to the chip's end
   expect(said.slice(at, at + 7).join('')).toHaveLength(33)
