@@ -602,7 +602,7 @@ export const register: Register = (on, options) => {
         rows.push([
           seg('✓', C.open), seg(' '), linked(`${c.ok} of ${c.total} checks`, `${item.url}/checks`),
           ...(item.failing?.length
-            ? [seg(' · '), seg('✗ ', C.closed), linked(item.failing[0]!.name, item.failing[0]!.url, C.closed), ...(item.failing.length > 1 ? [seg(` +${item.failing.length - 1}`, C.closed)] : [])]
+            ? [seg(' · '), seg('x ', C.closed), linked(item.failing[0]!.name, item.failing[0]!.url, C.closed), ...(item.failing.length > 1 ? [seg(` +${item.failing.length - 1}`, C.closed)] : [])]
             : []),
           ...(c.pending ? [seg(' · '), seg(`● ${c.pending} running`, C.warn)] : []),
         ])
@@ -654,7 +654,7 @@ export const register: Register = (on, options) => {
       else foot.push(seg(REVIEW_WORD[item.review ?? ''] ?? 'no reviews yet', C.dim))
       const c = item.checks
       if (!c?.total) return popup([...rows, [], foot])
-      const checks = linked(`${c.failed ? '✗' : '✓'} ${c.ok} of ${c.total} checks`, `${item.url}/checks`, c.failed ? C.closed : C.open)
+      const checks = linked(`${c.failed ? 'x' : '✓'} ${c.ok} of ${c.total} checks`, `${item.url}/checks`, c.failed ? C.closed : C.open)
       // A long login would wrap the checks in the middle: then they take a row of their own.
       const fits = foot.reduce((n, s) => n + s.text.length, 0) + 3 + checks.text.length <= INNER
       return popup([...rows, [], ...(fits ? [[...foot, seg(' · ', C.dim), checks]] : [foot, [checks]])])
@@ -667,7 +667,7 @@ export const register: Register = (on, options) => {
       if (entry?.missing) return span(ref.label)
       const item = entry?.item
       // A gray filled dot is a draft; loading is hollow and a failed lookup a cross, so neither reads as a state.
-      const dot = item ? span(`${DOT} `, color(item)) : entry?.error ? span('✗ ', C.closed) : span('○ ', C.dim)
+      const dot = item ? span(`${DOT} `, color(item)) : entry?.error ? span('x ', C.closed) : span('○ ', C.dim)
       const label = item
         ? Markdown({
             key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})`,
@@ -851,10 +851,9 @@ export const register: Register = (on, options) => {
 
   // Arrows (and a click) move the band's focus ring between chips: the focused chip is the selected one.
   on('ui.focus', ($, e, next) => {
-    // The focus on a chip's × keeps that chip selected.
-    const prefix = /^pr-cards-(?:select|remove)-/.exec(e.element ?? '')?.[0]
-    if (band && e.plugin === 'pr-cards' && prefix) {
-      const key = e.element!.slice(prefix.length)
+    const prefix = 'pr-cards-select-'
+    if (band && e.plugin === 'pr-cards' && e.element?.startsWith(prefix)) {
+      const key = e.element.slice(prefix.length)
       if (selected !== key) {
         selected = key
         armed = null
@@ -889,36 +888,32 @@ export const register: Register = (on, options) => {
       const entry = cache.get(key)
       const item = entry?.item
       const runs: Run[] = []
-      if (!item) runs.push({ text: `${entry?.error ? '✗' : '○'} `, color: entry?.error ? C.closed : C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
+      if (!item) runs.push({ text: `${entry?.error ? 'x' : '○'} `, color: entry?.error ? C.closed : C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
       else {
         const c = item.checks
         const tail: Run[] = [
           // A long login would eat the title: ten cells at most.
           { text: ` ${item.author.length > 10 ? `${item.author.slice(0, 9)}…` : item.author} ${age(item.created)}`, color: C.dim },
-          ...(c?.total ? [{ text: ` ${c.failed ? '✗' : c.pending ? '●' : '✓'}`, color: c.failed ? C.closed : c.pending ? C.warn : C.open }] : []),
+          ...(c?.total ? [{ text: ` ${c.failed ? 'x' : c.pending ? '●' : '✓'}`, color: c.failed ? C.closed : c.pending ? C.warn : C.open }] : []),
         ]
         const head = `#${t.number} `
-        // The title takes what the chip has left after the marker, dot, number, author, age, checks and ×.
-        const room = Math.max(4, CHIP - 3 - head.length - tail.reduce((n, r) => n + r.text.length, 0) - 2)
+        // The title takes what the chip has left after the marker, dot, number, author, age, checks and one cell of space.
+        const room = Math.max(4, CHIP - 3 - head.length - tail.reduce((n, r) => n + r.text.length, 0) - 1)
         const title = item.title.length > room ? `${item.title.slice(0, room - 1)}…` : item.title
         runs.push({ text: `${DOT} `, color: color(item) }, { text: head, color: C.link, bold: true }, { text: title }, ...tail)
       }
       const used = 1 + runs.reduce((n, r) => n + r.text.length, 0)
-      runs.push({ text: ' '.repeat(Math.max(1, CHIP - 1 - used)) })
+      // No × on the chip: x (or a click on `x: remove`) removes the selected one.
+      runs.push({ text: ' '.repeat(Math.max(1, CHIP - used)) })
       const edge = selected === key ? { text: '▎', color: 'suggestion' } : { text: ' ' }
       return Box({
         key: `pr-cards-chip-${key}`, flexDirection: 'row', flexShrink: 0,
         children: [
+          // One focus stop per chip, so ↑ ↓ step chip by chip.
           Button({
             key: `pr-cards-select-${key}`, label: `select #${t.number}`, plain: true,
             onPress: () => { selected = key; armed = null; $.ui.invalidate('ui.render') },
             children: [edge, ...runs].map((r) => Text({ color: r.color, bold: 'bold' in r ? r.bold : undefined, children: [r.text] })),
-          }),
-          // A press reports no cell, so the × is a Button of its own: a click on it removes the chip.
-          Button({
-            key: `pr-cards-remove-${key}`, label: `remove #${t.number}`, plain: true,
-            onPress: () => untrack($, key),
-            children: [Text({ color: C.dim, children: ['×'] })],
           }),
         ],
       })
@@ -974,7 +969,13 @@ export const register: Register = (on, options) => {
         }))
       }
     }
-    const hint = Text({ color: C.dim, children: ['  tracked'] })
+    // The title is a link, so the terminal draws it with its dotted underline: the repo's pull
+    // requests, or the signed-in user's outside a repo.
+    const pulls = cwdRepo ? `https://github.com/${cwdRepo}/pulls` : 'https://github.com/pulls'
+    const hint = Box({
+      flexDirection: 'row', paddingLeft: 2,
+      children: [Link({ href: pulls, children: [Text({ color: C.dim, children: ['tracked prs'] })] })],
+    })
     const keyRow = keys.length ? [Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 3, paddingLeft: 2, children: keys })] : []
     const ours = Box({ flexDirection: 'column', children: [hint, ...rows, ...keyRow] })
     return theirs ? Box({ flexDirection: 'column', children: [ours, theirs] }) : ours
