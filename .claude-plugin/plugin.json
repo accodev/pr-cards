@@ -1,6 +1,6 @@
 {
   "name": "pr-cards",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "license": "MIT",
   "description": "GitHub pull request chips with hover cards in the Claude Code transcript.",
   "userConfig": {

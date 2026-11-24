@@ -404,7 +404,9 @@ async function fetchChunk($: EngineInterface, repo: string, numbers: number[]) {
   const query = `query { viewer { login } repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${numbers.map((n) => `n${n}: issueOrPullRequest(number: ${n}) { ${FIELDS} }`).join('\n')} } }`
   const fail = (error: string) => numbers.forEach((n) => cache.set(keyFor(repo, n), { at: Date.now(), loading: false, error }))
   try {
-    const out = await $.process.run(['gh', 'api', 'graphql', '-f', `query=${query}`], { timeoutMs: 20_000 })
+    // The query goes in on stdin: about 900 characters a PR, so a batch of 40 (36,000) passes
+    // Windows' 32,767-character command line, and gh would not start.
+    const out = await $.process.run(['gh', 'api', 'graphql', '--input', '-'], { stdin: JSON.stringify({ query }), timeoutMs: 20_000 })
     const body = JSON.parse(out.stdout || '{}') as { data?: { viewer?: { login: string }; repository?: Record<string, Raw | null> | null }; errors?: { message: string }[] }
     viewer = body.data?.viewer?.login ?? viewer
     const found = body.data?.repository
