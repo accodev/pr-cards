@@ -226,14 +226,21 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   await clock.settle()
   // The click tracked #1319 and selected it: its chip and the hotkey row show.
   expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
-  // Design U2 with W1: the selected chip underlined in the theme's suggestion color, two chips wide
-  // (65 cells and the gap), so the whole title fits; no fills and no bar row.
+  // Design G1: a ▎ in the theme's suggestion color marks the selected chip; the chip shows the
+  // author and age dim and the checks' mark; it sits in the waiting group (not yours, no review
+  // asked of you); the hint row says only "tracked". No fill or underline anywhere.
   const texts = await band.findAll({ type: 'Text' })
-  const lined = texts.filter((t) => t.props.underline)
-  expect(new Set(lined.map((t) => t.props.color))).toEqual(new Set(['suggestion']))
-  expect(lined.map((t) => String(t.text)).join('')).toHaveLength(63) // then a space and the gap, as two chips take
-  expect(lined.map((t) => String(t.text)).join('')).toContain('#1319 fix: round VAT per line')
-  expect(texts.some((t) => t.props.backgroundColor || String(t.text).includes('▔'))).toBe(false)
+  const said = texts.map((t) => String(t.text))
+  expect(texts.find((t) => String(t.text) === '▎')?.props.color).toBe('suggestion')
+  expect(said).toContain('#1319 ')
+  expect(said).toContain(' lgreen 2d')
+  expect(said).toContain(' ✖')
+  expect(said).toContain('waiting   ')
+  expect(said).toContain('  tracked')
+  expect(texts.some((t) => t.props.backgroundColor || t.props.underline)).toBe(false)
+  // 115 body columns: three chips of 33 cells beside the 10-cell label.
+  const chipCells = said.slice(said.indexOf('▎'), said.indexOf('×') + 1).join('')
+  expect(chipCells).toHaveLength(33)
   const hotkeys = (await band.findAll({ type: 'Button' })).flatMap((b) => (b.props.hotkey ? [`${b.props.hotkey}: ${b.props.label}`] : []))
   expect(hotkeys).toEqual(['a: approve', 'r: request changes', 'f: re-run failed', 'o: open', 'c: copy link', 'x: remove'])
 
@@ -279,7 +286,7 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeUndefined()
 })
 
-test('keeps tracked PRs per session: another session\'s list stays out of this band', async ($, on) => {
+test('keeps tracked PRs per session when shareTracked is off', { options: { shareTracked: false } }, async ($, on) => {
   const clock = mock.clock(on)
   const day = 86_400_000
   // The store as a plain object, so the test can read back what the mod wrote.
@@ -321,21 +328,21 @@ test('keeps tracked PRs per session: another session\'s list stays out of this b
   expect(store['tracked.other']).toBeDefined()
 })
 
-test('names the focus chord the person bound in keybindings.json in the band hint', async ($, on) => {
+test('shares tracked PRs per repo and groups them: needs you, waiting, done', async ($, on) => {
   const clock = mock.clock(on)
-  const store: Record<string, unknown> = { 'tracked.session-a': { at: Date.now(), items: [{ repo: 'acme/pos-api', number: 1319 }] } }
+  const MINE = { ...PR, number: 1400, title: 'feat: export the day', url: 'https://github.com/acme/pos-api/pull/1400', author: { login: 'me' }, reviewDecision: null, latestReviews: { nodes: [] } }
+  const ASKED = { ...PR, reviewRequests: { nodes: [{ requestedReviewer: { login: 'me' } }] } }
+  const store: Record<string, unknown> = {
+    // Tracked in another session of this repo: this one shows it.
+    'tracked.repo.acme/pos-api': { at: Date.now(), items: [1250, 1307, 1319, 1400].map((number) => ({ repo: 'acme/pos-api', number })) },
+    'tracked.repo.acme/other': { at: Date.now(), items: [{ repo: 'acme/other', number: 5 }] },
+  }
   on('store.get', ($, e) => ({ value: store[e.key] }) as never)
   on('store.set', ($, e) => ((store[e.key] = e.value), { value: undefined }) as never)
   on('store.delete', ($, e) => (delete store[e.key], { value: undefined }) as never)
   on('store.keys', () => ({ value: Object.keys(store) }) as never)
-  on('session.id', () => ({ value: 'session-a' }))
-  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR } } }))))
-  const reads: string[] = []
-  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }) as never)
-  on('fs.read', ($, e) => {
-    reads.push(e.path)
-    return { value: JSON.stringify({ bindings: [{ context: 'Chat', bindings: { 'ctrl+x tab': null, 'alt+a': 'abovePrompt:focus' } }] }) } as never
-  })
+  on('session.id', () => ({ value: 'session-b' }))
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: ASKED, n1250: ISSUE, n1307: MERGED, n1400: MINE } } }))))
   const band = await $.ui.mount({
     plugin: 'pr-cards', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
     viewport: { columns: 120, rows: 40 },
@@ -343,15 +350,47 @@ test('names the focus chord the person bound in keybindings.json in the band hin
   } as never)
   await clock.settle()
   await clock.settle()
-  expect(reads.length).toBe(1)
-  expect(reads[0]).toMatch(/home[\\/]me[\\/]\.claude[\\/]keybindings\.json$/) // the engine writes the path the OS's way
-  const texts = (await band.findAll({ type: 'Text' })).map((t) => String(t.text))
-  expect(texts.some((t) => t.includes('or alt+a for the keys'))).toBe(true)
-  expect(texts.some((t) => t.includes('ctrl+x'))).toBe(false)
-  // Nothing selected in this session yet: no chip is underlined, so no line changes color mid-chip.
-  expect((await band.findAll({ type: 'Text' })).some((t) => t.props.underline)).toBe(false)
+  expect(await band.find({ key: 'pr-cards-select-acme/other#5' })).toBeUndefined()
+  // #1319 asks for your review and #1400 is yours with a failing check: they need you. The open
+  // issue waits. #1307 is merged. Each group's first row carries its label.
+  const said = (await band.findAll({ type: 'Text' })).map((t) => String(t.text))
+  const at = (s: string) => said.indexOf(s)
+  expect(at('needs you ')).toBeGreaterThanOrEqual(0)
+  expect(at('needs you ')).toBeLessThan(at('#1319 '))
+  expect(at('#1319 ')).toBeLessThan(at('#1400 '))
+  expect(at('#1400 ')).toBeLessThan(at('waiting   '))
+  expect(at('waiting   ')).toBeLessThan(at('#1250 '))
+  expect(at('#1250 ')).toBeLessThan(at('done      '))
+  expect(at('done      ')).toBeLessThan(at('#1307 '))
+
+  // x in this session changes the repo's list, which every session of the repo reads.
+  await band.press({ key: 'pr-cards-select-acme/pos-api#1250' })
+  await band.press({ key: 'pr-cards-x' })
+  await clock.settle()
+  expect((store['tracked.repo.acme/pos-api'] as { items: { number: number }[] }).items.map((t) => t.number)).toEqual([1307, 1319, 1400])
+  expect(store['tracked.session-b']).toBeUndefined()
 })
 
+test('a folder outside git keeps one tracked list for its sessions', async ($, on) => {
+  const clock = mock.clock(on)
+  const store: Record<string, unknown> = { 'tracked.dir./work/notes': { at: Date.now(), items: [{ repo: 'acme/pos-api', number: 1319 }] } }
+  on('store.get', ($, e) => ({ value: store[e.key] }) as never)
+  on('store.set', ($, e) => ((store[e.key] = e.value), { value: undefined }) as never)
+  on('store.delete', ($, e) => (delete store[e.key], { value: undefined }) as never)
+  on('store.keys', () => ({ value: Object.keys(store) }) as never)
+  on('session.id', () => ({ value: 'session-c' }))
+  on('session.cwd', () => ({ value: '/work/notes' }))
+  // gh finds no repo here.
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? { value: { exitCode: 1, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } } : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR } } }))))
+  const band = await $.ui.mount({
+    plugin: 'pr-cards', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
+    viewport: { columns: 120, rows: 40 },
+    props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 115 },
+  } as never)
+  await clock.settle()
+  await clock.settle()
+  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
+})
 test('leaves a message without references to Claude Code', async ($, on) => {
   on('process.run', () => {
     throw new Error('gh must not run')
