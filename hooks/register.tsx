@@ -863,8 +863,8 @@ export const register: Register = (on, options) => {
 
   // Arrows (and a click) move the band's focus ring between chips: the focused chip is the selected one.
   on('ui.focus', ($, e, next) => {
-    const prefix = 'pr-cards-select-'
-    if (band && e.plugin === 'pr-cards' && e.element?.startsWith(prefix)) {
+    const prefix = 'pullywog-select-'
+    if (band && e.plugin === 'pullywog' && e.element?.startsWith(prefix)) {
       const key = e.element.slice(prefix.length)
       if (selected !== key) {
         selected = key
@@ -921,11 +921,11 @@ export const register: Register = (on, options) => {
       runs.push({ text: ' '.repeat(Math.max(1, CHIP - used)) })
       const edge = selected === key ? { text: '▎', color: 'suggestion' } : { text: ' ' }
       return Box({
-        key: `pr-cards-chip-${key}`, flexDirection: 'row', flexShrink: 0,
+        key: `pullywog-chip-${key}`, flexDirection: 'row', flexShrink: 0,
         children: [
           // One focus stop per chip, so ↑ ↓ step chip by chip.
           Button({
-            key: `pr-cards-select-${key}`, label: `select #${t.number}`, plain: true,
+            key: `pullywog-select-${key}`, label: `select #${t.number}`, plain: true,
             onPress: () => { selected = key; armed = null; $.ui.invalidate('ui.render') },
             children: [edge, ...runs].map((r) => Text({ color: r.color, bold: 'bold' in r ? r.bold : undefined, children: [r.text] })),
           }),
@@ -934,7 +934,7 @@ export const register: Register = (on, options) => {
     }
 
     // A hotkey button drawn plain: the key in the accent color, then its label (`a: approve`).
-    const hotkey = (letter: string, label: string, onPress: () => unknown) => Button({ key: `pr-cards-${letter}`, hotkey: letter, label, plain: true, onPress })
+    const hotkey = (letter: string, label: string, onPress: () => unknown) => Button({ key: `pullywog-${letter}`, hotkey: letter, label, plain: true, onPress })
 
     const picked = tracked.find((t) => keyFor(t.repo, t.number) === selected)
     const item = picked ? cache.get(keyFor(picked.repo, picked.number))?.item : undefined
@@ -991,7 +991,7 @@ export const register: Register = (on, options) => {
     const hint = Box({
       flexDirection: 'row', paddingLeft: 2, marginTop: 1,
       children: [Button({
-        key: 'pr-cards-fold', label: folded ? 'show the tracked PRs' : 'hide the tracked PRs', plain: true,
+        key: 'pullywog-fold', label: folded ? 'show the tracked PRs' : 'hide the tracked PRs', plain: true,
         onPress: () => { folded = !folded; $.ui.invalidate('ui.render') },
         children: [Text({ color: 'inverseText', backgroundColor: 'claude', bold: true, children: [label.padEnd(columns)] })],
       })],

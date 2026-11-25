@@ -13,7 +13,7 @@ const MERGED = { ...PR, number: 1307, title: 'feat: export (#1250, other/lib#3)'
 const ISSUE = { __typename: 'Issue', number: 1250, title: 'Till says what is missing', url: 'https://github.com/acme/pos-api/issues/1250', state: 'OPEN', stateReason: null, author: { login: 'kpark' }, comments: { totalCount: 4 }, createdAt: PR.createdAt, closedAt: null }
 
 const message = (text: string) => ({
-  plugin: 'pr-cards',
+  plugin: 'pullywog',
   component: 'AssistantMessage',
   requestId: 'msg-1',
   surface: 'terminal',
@@ -218,14 +218,14 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   await reply.press({ key: String(link?.props.key), link: { href: PR.url } })
 
   const bandInput = {
-    plugin: 'pr-cards', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
+    plugin: 'pullywog', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
     viewport: { columns: 120, rows: 40 },
     props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 115 },
   } as const
   const band = await $.ui.mount(bandInput as never)
   await clock.settle()
   // The click tracked #1319 and selected it: its chip and the hotkey row show.
-  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1319' })).toBeDefined()
   // Design G1: a ▎ in the theme's suggestion color marks the selected chip; the chip shows the
   // author and age dim and the checks' mark; it sits in the waiting group (not yours, no review
   // asked of you); the hint row says only "tracked". No fill or underline anywhere.
@@ -245,19 +245,19 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   const at = said.indexOf('▎') // then the dot, number, title, author and age, checks, and the space to the chip's end
   expect(said.slice(at, at + 7).join('')).toHaveLength(32)
   // A click on the bar folds the chips and keys away, leaving the bar with the count; again, back.
-  await band.press({ key: 'pr-cards-fold' })
+  await band.press({ key: 'pullywog-fold' })
   await clock.settle()
-  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeUndefined()
-  expect(await band.find({ key: 'pr-cards-x' })).toBeUndefined()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1319' })).toBeUndefined()
+  expect(await band.find({ key: 'pullywog-x' })).toBeUndefined()
   expect((await band.findAll({ type: 'Text' })).some((t) => String(t.text).startsWith(' ▸ Tracked PRs · 1'))).toBe(true)
-  await band.press({ key: 'pr-cards-fold' })
+  await band.press({ key: 'pullywog-fold' })
   await clock.settle()
-  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1319' })).toBeDefined()
   const hotkeys = (await band.findAll({ type: 'Button' })).flatMap((b) => (b.props.hotkey ? [`${b.props.hotkey}: ${b.props.label}`] : []))
   expect(hotkeys).toEqual(['a: approve', 'r: request changes', 'f: re-run failed', 'o: open', 'c: copy link', 'x: remove'])
 
   // c: the link as rich text (the clipboard's HTML format) and as plain text, through Windows PowerShell.
-  await band.press({ key: 'pr-cards-c' })
+  await band.press({ key: 'pullywog-c' })
   await clock.settle()
   const sent = JSON.parse(stdins[0]!) as { html: string; text: string }
   expect(sent.text).toBe(`acme/pos-api#1319 fix: round VAT per line ${PR.url}`)
@@ -270,32 +270,32 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   expect(copies).toEqual([])
   // Without Windows PowerShell it falls back to Claude Code's own copy, plain text.
   powershellWorks = false
-  await band.press({ key: 'pr-cards-c' })
+  await band.press({ key: 'pullywog-c' })
   await clock.settle()
   expect(copies).toEqual([`acme/pos-api#1319 fix: round VAT per line ${PR.url}`])
 
   // f: the failing check's run (…/actions/runs/7) is re-run, failed jobs only.
-  await band.press({ key: 'pr-cards-f' })
+  await band.press({ key: 'pullywog-f' })
   await clock.settle()
   expect(runs).toContainEqual(['gh', 'run', 'rerun', '7', '--failed', '--repo', 'acme/pos-api'])
 
   // a: approving takes two presses; only the second runs gh.
-  await band.press({ key: 'pr-cards-a' })
+  await band.press({ key: 'pullywog-a' })
   expect(runs.some((r) => r[1] === 'pr' && r[2] === 'review')).toBe(false)
-  expect((await band.find({ key: 'pr-cards-a' }))?.props.label).toBe('press a again to approve')
-  await band.press({ key: 'pr-cards-a' })
+  expect((await band.find({ key: 'pullywog-a' }))?.props.label).toBe('press a again to approve')
+  await band.press({ key: 'pullywog-a' })
   await clock.settle()
   expect(runs).toContainEqual(['gh', 'pr', 'review', '1319', '--repo', 'acme/pos-api', '--approve'])
 
   // o opens it in the browser through gh.
-  await band.press({ key: 'pr-cards-o' })
+  await band.press({ key: 'pullywog-o' })
   await clock.settle()
   expect(runs).toContainEqual(['gh', 'pr', 'view', '1319', '--repo', 'acme/pos-api', '--web'])
 
   // x removes it, and the band goes away with the last chip.
-  await band.press({ key: 'pr-cards-x' })
+  await band.press({ key: 'pullywog-x' })
   await clock.settle()
-  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeUndefined()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1319' })).toBeUndefined()
 })
 
 test('keeps tracked PRs per session when shareTracked is off', { options: { shareTracked: false } }, async ($, on) => {
@@ -314,15 +314,15 @@ test('keeps tracked PRs per session when shareTracked is off', { options: { shar
   on('session.id', () => ({ value: 'session-a' }))
   on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR, n1250: ISSUE } } }))))
   const bandInput = {
-    plugin: 'pr-cards', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
+    plugin: 'pullywog', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
     viewport: { columns: 120, rows: 40 },
     props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 115 },
   } as const
   const band = await $.ui.mount(bandInput as never)
   await clock.settle()
   // Nothing of the other session, nor of the old shared list.
-  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1250' })).toBeUndefined()
-  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1' })).toBeUndefined()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1250' })).toBeUndefined()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1' })).toBeUndefined()
 
   const reply = await $.ui.mount(message('See #1319.'))
   await clock.settle()
@@ -330,8 +330,8 @@ test('keeps tracked PRs per session when shareTracked is off', { options: { shar
   const link = await reply.find({ type: 'Markdown', text: '[#1319](https://github.com/acme/pos-api/pull/1319)' })
   await reply.press({ key: String(link?.props.key), link: { href: PR.url } })
   await clock.settle()
-  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
-  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1250' })).toBeUndefined()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1319' })).toBeDefined()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1250' })).toBeUndefined()
 
   // Saved under this session; the shared list and the idle session's list are gone, the recent one stays.
   expect((store['tracked.session-a'] as { items: unknown[] }).items).toEqual([{ repo: 'acme/pos-api', number: 1319 }])
@@ -356,13 +356,13 @@ test('shares tracked PRs per repo and groups them: needs you, waiting, done', as
   on('session.id', () => ({ value: 'session-b' }))
   on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: ASKED, n1250: ISSUE, n1307: MERGED, n1400: MINE } } }))))
   const band = await $.ui.mount({
-    plugin: 'pr-cards', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
+    plugin: 'pullywog', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
     viewport: { columns: 120, rows: 40 },
     props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 115 },
   } as never)
   await clock.settle()
   await clock.settle()
-  expect(await band.find({ key: 'pr-cards-select-acme/other#5' })).toBeUndefined()
+  expect(await band.find({ key: 'pullywog-select-acme/other#5' })).toBeUndefined()
   // #1319 asks for your review and #1400 is yours with a failing check: they need you. The open
   // issue waits. #1307 is merged. Each group's first row carries its label.
   const said = (await band.findAll({ type: 'Text' })).map((t) => String(t.text))
@@ -376,8 +376,8 @@ test('shares tracked PRs per repo and groups them: needs you, waiting, done', as
   expect(at('done      ')).toBeLessThan(at('#1307 '))
 
   // x removes the selected chip from the repo's list, which every session of the repo reads.
-  await band.press({ key: 'pr-cards-select-acme/pos-api#1250' })
-  await band.press({ key: 'pr-cards-x' })
+  await band.press({ key: 'pullywog-select-acme/pos-api#1250' })
+  await band.press({ key: 'pullywog-x' })
   await clock.settle()
   expect((store['tracked.repo.acme/pos-api'] as { items: { number: number }[] }).items.map((t) => t.number)).toEqual([1307, 1319, 1400])
   expect(store['tracked.session-b']).toBeUndefined()
@@ -386,17 +386,17 @@ test('shares tracked PRs per repo and groups them: needs you, waiting, done', as
   // write #1319 back.
   const numbers = () => (store['tracked.repo.acme/pos-api'] as { items: { number: number }[] }).items.map((t) => t.number)
   store['tracked.repo.acme/pos-api'] = { at: Date.now(), items: [1307, 1400].map((number) => ({ repo: 'acme/pos-api', number })) }
-  await band.press({ key: 'pr-cards-select-acme/pos-api#1307' })
-  await band.press({ key: 'pr-cards-x' })
+  await band.press({ key: 'pullywog-select-acme/pos-api#1307' })
+  await band.press({ key: 'pullywog-x' })
   await clock.settle()
   expect(numbers()).toEqual([1400])
-  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeUndefined()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1319' })).toBeUndefined()
 
   // An idle session picks another session's change up on the timer, with no redraw of its own.
   store['tracked.repo.acme/pos-api'] = { at: Date.now(), items: [] }
   await clock.advance(5_000)
   await clock.settle()
-  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1400' })).toBeUndefined()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1400' })).toBeUndefined()
 })
 
 test('a folder outside git keeps one tracked list for its sessions', async ($, on) => {
@@ -411,13 +411,13 @@ test('a folder outside git keeps one tracked list for its sessions', async ($, o
   // gh finds no repo here.
   on('process.run', ($, e) => (e.argv[1] === 'repo' ? { value: { exitCode: 1, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } } : ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR } } }))))
   const band = await $.ui.mount({
-    plugin: 'pr-cards', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
+    plugin: 'pullywog', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
     viewport: { columns: 120, rows: 40 },
     props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 115 },
   } as never)
   await clock.settle()
   await clock.settle()
-  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeDefined()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1319' })).toBeDefined()
 })
 
 test('sends the query on stdin, so 40 references fit past the Windows command-line limit', async ($, on) => {
