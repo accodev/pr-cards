@@ -106,8 +106,11 @@ function loadTracked($: EngineInterface) {
     // A click before the list came back is kept, after what the list held before.
     const clicked = tracked.filter((t) => !earlier.some((e) => keyFor(e.repo, e.number) === keyFor(t.repo, t.number)))
     tracked = [...earlier, ...clicked]
-    if (clicked.length) saveTracked($)
+    if (clicked.length) changeTracked($, (items) => [...items, ...clicked.filter((c) => !items.some((t) => keyFor(t.repo, t.number) === keyFor(c.repo, c.number)))])
     $.ui.invalidate('ui.render')
+    // An idle session draws nothing, so its band would keep a list other sessions changed: read
+    // the shared list on a timer too.
+    if (shareTracked) $.clock.every(SHARED_READ_MS, () => { listReadAt = 0; rereadTracked($) })
     // Drop the lists idle past TRACKED_TTL_MS, and the one list 0.4 and 0.5 shared.
     for (const key of await $.store.keys()) {
       if (key === 'tracked') await $.store.delete(key)
@@ -134,28 +137,35 @@ function rereadTracked($: EngineInterface) {
   }).catch(() => undefined)
 }
 
-function saveTracked($: EngineInterface) {
-  if (listKey) {
-    listReadAt = Date.now()
-    void $.store.set(listKey, { at: Date.now(), items: tracked } satisfies SavedList).catch(() => undefined)
-  }
+// Applies one change to the list as the store holds it now, not to this session's copy: a copy
+// another session changed since would otherwise be written back whole, undoing that change.
+function changeTracked($: EngineInterface, change: (items: Tracked[]) => Tracked[]) {
+  tracked = change(tracked)
+  $.ui.invalidate('ui.render')
+  const key = listKey
+  if (!key) return // the list has not loaded yet: loadTracked merges this session's clicks in
+  listReadAt = Date.now()
+  void (async () => {
+    const items = change(savedItems(await $.store.get(key)))
+    await $.store.set(key, { at: Date.now(), items } satisfies SavedList)
+    if (key !== listKey) return
+    tracked = items
+    if (selected && !tracked.some((t) => keyFor(t.repo, t.number) === selected)) selected = null
+    $.ui.invalidate('ui.render')
+  })().catch(() => undefined)
 }
 
 function track($: EngineInterface, repo: string, number: number) {
   // A click can come before the band ever drew: the session's list loads here, the click merges in.
   loadTracked($)
   const key = keyFor(repo, number)
-  if (!tracked.some((t) => keyFor(t.repo, t.number) === key)) tracked.push({ repo, number })
   selected = key
-  saveTracked($)
-  $.ui.invalidate('ui.render')
+  changeTracked($, (items) => (items.some((t) => keyFor(t.repo, t.number) === key) ? items : [...items, { repo, number }]))
 }
 
 function untrack($: EngineInterface, key: string) {
-  tracked = tracked.filter((t) => keyFor(t.repo, t.number) !== key)
   if (selected === key) selected = null
-  saveTracked($)
-  $.ui.invalidate('ui.render')
+  changeTracked($, (items) => items.filter((t) => keyFor(t.repo, t.number) !== key))
 }
 
 // Runs a gh command for an action and reports how it went in a toast.
