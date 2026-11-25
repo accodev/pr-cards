@@ -15,7 +15,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CLAUDE_CODE_VERSION: 2.1.327
+  # 2.1.332 is the build checked to have `claude plugin tag`; ci.yml pins the build the mod is tested on.
+  CLAUDE_CODE_VERSION: 2.1.332
 
 jobs:
   release:
