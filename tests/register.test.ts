@@ -379,6 +379,22 @@ test('shares tracked PRs per repo and groups them: needs you, waiting, done', as
   await clock.settle()
   expect((store['tracked.repo.acme/pos-api'] as { items: { number: number }[] }).items.map((t) => t.number)).toEqual([1307, 1319, 1400])
   expect(store['tracked.session-b']).toBeUndefined()
+
+  // Another session removes #1319. This one's copy still holds it; removing #1307 here must not
+  // write #1319 back.
+  const numbers = () => (store['tracked.repo.acme/pos-api'] as { items: { number: number }[] }).items.map((t) => t.number)
+  store['tracked.repo.acme/pos-api'] = { at: Date.now(), items: [1307, 1400].map((number) => ({ repo: 'acme/pos-api', number })) }
+  await band.press({ key: 'pr-cards-select-acme/pos-api#1307' })
+  await band.press({ key: 'pr-cards-x' })
+  await clock.settle()
+  expect(numbers()).toEqual([1400])
+  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1319' })).toBeUndefined()
+
+  // An idle session picks another session's change up on the timer, with no redraw of its own.
+  store['tracked.repo.acme/pos-api'] = { at: Date.now(), items: [] }
+  await clock.advance(5_000)
+  await clock.settle()
+  expect(await band.find({ key: 'pr-cards-select-acme/pos-api#1400' })).toBeUndefined()
 })
 
 test('a folder outside git keeps one tracked list for its sessions', async ($, on) => {
