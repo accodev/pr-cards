@@ -239,6 +239,8 @@ test('a click tracks a PR in the band above the prompt, with actions for the sel
   const title = texts.find((t) => String(t.text).startsWith(' ▾ Tracked PRs'))!
   expect([title.props.color, title.props.backgroundColor, title.props.bold, String(title.text).length]).toEqual(['inverseText', 'claude', true, 113])
   expect(texts.some((t) => (t !== title && t.props.backgroundColor) || t.props.underline)).toBe(false)
+  // One blank row above the bar parts the band from the transcript.
+  expect((await band.findAll({ type: 'Box' })).filter((b) => b.props.marginTop === 1)).toHaveLength(1)
   // 115 body columns: three chips of 32 cells beside the 4-cell indent and the 10-cell label.
   const at = said.indexOf('▎') // then the dot, number, title, author and age, checks, and the space to the chip's end
   expect(said.slice(at, at + 7).join('')).toHaveLength(32)

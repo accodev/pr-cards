@@ -989,7 +989,7 @@ export const register: Register = (on, options) => {
     // hides the whole band, this bar included.
     const label = folded ? ` ▸ Tracked PRs · ${tracked.length}` : ' ▾ Tracked PRs'
     const hint = Box({
-      flexDirection: 'row', paddingLeft: 2,
+      flexDirection: 'row', paddingLeft: 2, marginTop: 1,
       children: [Button({
         key: 'pr-cards-fold', label: folded ? 'show the tracked PRs' : 'hide the tracked PRs', plain: true,
         onPress: () => { folded = !folded; $.ui.invalidate('ui.render') },
