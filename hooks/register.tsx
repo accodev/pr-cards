@@ -880,9 +880,11 @@ export const register: Register = (on, options) => {
     // row; a ▎ in the theme's suggestion color marks the selected chip. No fill or underline: a
     // terminal draws an underline in each character's color.
     const LABEL = 10
+    // Design I3: the group rows start four cells right of the Tracked PRs bar, as its contents.
+    const INDENT = 4
     const columns = Math.max(40, e.props.bodyColumns) - 2
-    // `perRow` chips share what the label leaves, each with a cell of gap: 33 cells in 120 columns.
-    const CHIP = Math.max(24, Math.min(44, Math.floor((columns - LABEL) / perRow) - 1))
+    // `perRow` chips share what the indent and label leave, each with a cell of gap: 32 cells in 120 columns.
+    const CHIP = Math.max(24, Math.min(44, Math.floor((columns - INDENT - LABEL) / perRow) - 1))
     type Run = { text: string; color?: string; bold?: boolean }
 
     const chip = (t: Tracked) => {
@@ -963,7 +965,7 @@ export const register: Register = (on, options) => {
     for (const [name, list] of groups) {
       for (let i = 0; i < list.length; i += perRow) {
         rows.push(Box({
-          flexDirection: 'row', paddingLeft: 2,
+          flexDirection: 'row', paddingLeft: 2 + INDENT,
           children: [
             Text({ color: C.dim, children: [(i ? '' : name).padEnd(LABEL)] }),
             Box({ flexDirection: 'row', columnGap: 1, children: list.slice(i, i + perRow).map(chip) }),
