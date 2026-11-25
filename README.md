@@ -21,7 +21,7 @@ The details come from one `gh api graphql` call per repo, cached for 60 seconds.
 ## Install
 
 ```sh
-claude plugin marketplace add accodev/pr-cards
+claude plugin marketplace add accodev/pullywog
 claude plugin install pullywog@pullywog
 ```
 
