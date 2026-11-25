@@ -1,4 +1,4 @@
-# pr-cards
+# pullywog
 
 A Claude Code mod that turns GitHub pull request and issue references in Claude's replies into live links.
 
@@ -22,10 +22,19 @@ The details come from one `gh api graphql` call per repo, cached for 60 seconds.
 
 ```sh
 claude plugin marketplace add accodev/pr-cards
-claude plugin install pr-cards@pr-cards
+claude plugin install pullywog@pullywog
 ```
 
-Then run `/reload-plugins` in a running session, or start a new one. Remove it with `claude plugin uninstall pr-cards@pr-cards`.
+Then run `/reload-plugins` in a running session, or start a new one. Remove it with `claude plugin uninstall pullywog@pullywog`.
+
+Before 0.8.0 the plugin was named pr-cards. To move over, remove the old one and its marketplace, then install as above:
+
+```sh
+claude plugin uninstall pr-cards@pr-cards
+claude plugin marketplace remove pr-cards
+```
+
+The tracked lists live in the plugin's own store file under `~/.claude/plugins/store/`. To keep them, copy `pr-cards_pr-cards-*.json` over the new `pullywog_pullywog-*.json` once pullywog has run.
 
 ## Settings
 
@@ -39,7 +48,7 @@ Then run `/reload-plugins` in a running session, or start a new one. Remove it w
 Set them in `/plugin`, or from the shell:
 
 ```sh
-echo '{"cardStyle": "github"}' | claude plugin configure pr-cards@pr-cards --values-stdin
+echo '{"cardStyle": "github"}' | claude plugin configure pullywog@pullywog --values-stdin
 ```
 
 ## Develop

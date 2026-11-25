@@ -1,4 +1,4 @@
-"""Drives a real fullscreen Claude Code session with the pr-cards mod, then checks the hover card and the click panel.
+"""Drives a real fullscreen Claude Code session with the pullywog mod, then checks the hover card and the click panel.
 
 Run from the repo root, with the folder of a GitHub repo that has PR 1306 and issue 1250 (fiskaltrust/market-it):
     uv run --no-project --with pywinpty --with pyte python -I scripts/e2e.py C:/code/market-it
