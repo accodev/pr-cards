@@ -3,8 +3,10 @@ import { readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { copyToClipboard, getAgentDir, type ExtensionAPI, type ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { matchesKey, type Component, type TUI } from '@earendil-works/pi-tui'
+import { CARD_WIDTH, cardLines, errorCard } from './card.ts'
+import { watchPointer } from './pointer.ts'
 import {
-  BATCH, TTL_MS, bandLines, decorate, findRefs, keyFor, label, linkFormats, listName, pruned, query, runIds, sameList, savedItems, step,
+  BATCH, TTL_MS, bandLines, decorate, findRefs, keyFor, label, linkFormats, listName, pruned, query, refAt, runIds, sameList, savedItems, step,
   toItem, withTracked, withoutTracked, type Band, type Entry, type Hit, type Raw, type Ref, type SavedList, type Style, type Tracked,
 } from './prs.ts'
 
@@ -14,11 +16,20 @@ const SHARED_READ_MS = 5_000
 const REFRESH_MS = 60_000
 const FOCUS_KEY = 'alt+a'
 
-type Settings = { trackedBand: boolean; perRow: number; share: boolean }
+type Settings = { cardStyle: 'card' | 'github'; trackedBand: boolean; perRow: number; share: boolean }
 function readSettings(raw: unknown): Settings {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const off = (v: unknown) => v === false || String(v).toLowerCase() === 'false'
-  return { trackedBand: !off(o.trackedBand), perRow: Math.max(1, Math.min(6, Math.round(Number(o.bandPerRow) || 3))), share: !off(o.shareTracked) }
+  return {
+    cardStyle: String(o.cardStyle ?? 'card').trim().toLowerCase() === 'github' ? 'github' : 'card',
+    trackedBand: !off(o.trackedBand), perRow: Math.max(1, Math.min(6, Math.round(Number(o.bandPerRow) || 3))), share: !off(o.shareTracked),
+  }
+}
+
+// The system's own handler opens a page, as Pi does for a link.
+function openUrl(url: string) {
+  const [cmd, args] = process.platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]]
+  spawn(cmd as string, args as string[], { detached: true, stdio: 'ignore', windowsHide: true }).on('error', () => undefined).unref()
 }
 
 // Every Pi session's tracked lists, in one file as the Claude Code mod keeps them in its store.
@@ -88,6 +99,9 @@ export default function pullywog(pi: ExtensionAPI) {
   // While the band has the keyboard it draws in the editor's place, and the widget draws nothing.
   let focused = false
   let timers: NodeJS.Timeout[] = []
+  // The stdin reader for hover and click on references, one per TUI.
+  let pointerTui: TUI | undefined
+  let stopPointer: (() => void) | undefined
 
   const redraw = () => tui?.requestRender()
   const repoOf = (r: Ref) => r.repo ?? cwdRepo
@@ -281,6 +295,23 @@ export default function pullywog(pi: ExtensionAPI) {
     if (!settings.trackedBand) return c.ui.setWidget('pullywog', undefined)
     c.ui.setWidget('pullywog', (t, theme) => {
       tui = t
+      if (pointerTui !== t) {
+        stopPointer?.()
+        pointerTui = t
+        stopPointer = watchPointer(t, {
+          width: CARD_WIDTH,
+          cardFor: (r) => {
+            const entry = lookup(r)
+            return entry?.item ? cardLines(entry.item, settings.cardStyle, viewer) : entry?.error ? errorCard(entry.error) : undefined
+          },
+          want: (r) => want(r),
+          track: (r) => void track(r),
+          open: (r) => {
+            const repo = r.repo ?? cwdRepo
+            if (repo) openUrl(lookup(r)?.item?.url ?? `https://github.com/${repo}/issues/${r.number}`)
+          },
+        })
+      }
       return bandComponent({ bar: (s) => theme.inverse(theme.fg('accent', s)), mark: (s) => theme.fg('accent', s), bold: (s) => theme.bold(s) }, false)
     }, { placement: 'aboveEditor' })
   }
@@ -404,6 +435,9 @@ export default function pullywog(pi: ExtensionAPI) {
   })
 
   pi.on('session_shutdown', async () => {
+    stopPointer?.()
+    stopPointer = undefined
+    pointerTui = undefined
     timers.forEach(clearInterval)
     timers = []
   })

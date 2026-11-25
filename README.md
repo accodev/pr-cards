@@ -42,13 +42,14 @@ The tracked lists live in the plugin's own store file under `~/.claude/plugins/s
 pi install git:github.com/accodev/pullywog
 ```
 
-Run `/reload` in an open session to load it. Pi draws the transcript itself and gives extensions no hook for the mouse inside it, so the Pi extension differs from the Claude Code mod in three ways:
+Run `/reload` in an open session to load it. In Pi's fullscreen mode (`tuiMode`, the default) the extension works as the Claude Code mod:
 
-- References in replies get the state dot and become links. A hover opens no card.
+- References in replies get the state dot. Hovering one opens its card (`cardStyle` picks `card` or `github`), a plain click tracks it, and Ctrl+click opens it on GitHub. A click on a link in the card opens it.
+- Pi gives extensions no mouse hook in its transcript, so pullywog reads the mouse reports from the terminal input beside Pi, as `@narumitw/pi-inline` does. Pi's regular mode, tmux, Zellij and Screen send none: there the dots show, and `/track` stands in for the click.
 - `/track #1234` (or `owner/repo#1234`, or a GitHub URL) puts a PR in the band; with no argument it offers the references of this session's replies. `/untrack` takes it out.
 - `Alt+A` moves to the band: arrows pick a chip, the same keys act on it (`a` approve, press twice; `r` request changes; `f` re-run failed checks; `o` open; `c` copy the link; `x` remove), Esc goes back. In Pi's fullscreen mode (`tuiMode`, the default) a click on the bar folds the band, and a click on a chip selects it.
 
-The band, its groups and its chips match the Claude Code mod. Pi has no orange theme key: the bar takes the theme's accent color. The Pi extension keeps the tracked lists in `~/.pi/agent/pullywog.json`, apart from Claude Code's. Pi's `settings.json` takes `trackedBand`, `bandPerRow` and `shareTracked` (below) under a `pullywog` key, for example `"pullywog": { "bandPerRow": 2 }`.
+The band, its groups and its chips match the Claude Code mod. Pi has no orange theme key: the bar takes the theme's accent color. The Pi extension keeps the tracked lists in `~/.pi/agent/pullywog.json`, apart from Claude Code's. Pi's `settings.json` takes `cardStyle`, `trackedBand`, `bandPerRow` and `shareTracked` (below) under a `pullywog` key, for example `"pullywog": { "bandPerRow": 2 }`.
 
 ## Settings
 

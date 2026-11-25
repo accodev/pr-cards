@@ -6,7 +6,7 @@
   "type": "module",
   "repository": "github:accodev/pullywog",
   "keywords": ["pi-package"],
-  "files": ["pi/index.ts", "pi/prs.ts"],
+  "files": ["pi/index.ts", "pi/prs.ts", "pi/card.ts", "pi/pointer.ts"],
   "pi": {
     "extensions": ["./pi/index.ts"]
   },

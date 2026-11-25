@@ -1,8 +1,9 @@
-"""Drives a real Pi session with only the pullywog extension, then checks the band, the keys and the dots.
+"""Drives a real Pi session with only the pullywog extension, then checks the band, the keys, the dots,
+the hover card and the click that tracks a reference.
 
 Run from the repo root, with the folder of a GitHub repo that has PR 1306 and issue 1250 (fiskaltrust/market-it):
     uv run --no-project --with pywinpty --with pyte python -I scripts/pi-e2e.py C:/code/market-it
-It tracks PR 1306 and removes it again; it presses no action key that reaches GitHub.
+It tracks PR 1306 and issue 1250 and removes them again; it presses no action key that reaches GitHub.
 Each screen is saved as text in scripts/e2e-out/. Exit code 0 means every check passed.
 """
 import os, sys, threading, time
@@ -59,6 +60,14 @@ def wait(pred, timeout, label):
     return False
 
 
+def find(s):
+    for y, line in enumerate(text().split("\n")):
+        x = line.find(s)
+        if x >= 0:
+            return x + 1, y + 1
+    return None
+
+
 def send(s):
     for ch in s:
         proc.write(ch)
@@ -81,7 +90,27 @@ try:
     checks["back"] = wait(lambda t: "x remove" not in t and "Tracked PRs" in t, 15, "back")
     send("Reply with exactly this sentence and use no tools: PR #1306 fixed issue #1250.")
     proc.write("\r")
-    checks["dots"] = wait(lambda t: any("● #1306" in l and "● #1250" in l for l in t.split("\n")), 120, "dots")
+    checks["dots"] = wait(lambda t: any("⬤ #1306" in l and "⬤ #1250" in l for l in t.split("\n")), 120, "dots")
+    # The pointer rests on #1250 in the reply: its card opens with the repo and the issue's URL.
+    at = find("⬤ #1250")
+    if at:
+        x, y = at[0] + 3, at[1]
+        proc.write(f"\x1b[<35;{x};{y}M")
+        checks["hover card"] = wait(lambda t: "github.com/fiskaltrust/market-it/issues/1250" in t, 20, "hover")
+        proc.write(f"\x1b[<35;{x};{max(1, y - 30)}M")
+        checks["card closes"] = wait(lambda t: "github.com/fiskaltrust/market-it/issues/1250" not in t, 10, "unhover")
+        # A plain click on the reference tracks it.
+        proc.write(f"\x1b[<0;{x};{y}M")
+        proc.write(f"\x1b[<0;{x};{y}m")
+        checks["click tracks"] = wait(lambda t: any("#1250 " in l and ("waiting" in l or "done" in l or "needs you" in l or l.startswith(" " * 16)) for l in t.split("\n")), 20, "click")
+        send("/untrack #1250")
+        time.sleep(0.5)
+        proc.write("\r")
+        time.sleep(0.5)
+        proc.write("\r")
+        time.sleep(1)
+    else:
+        checks["hover card"] = False
     send("/untrack #1306")
     time.sleep(0.5)
     # The first Enter takes the completion menu's entry, the second runs the command.

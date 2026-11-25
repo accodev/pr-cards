@@ -4,7 +4,7 @@ pullywog (named pr-cards before 0.8.0) is a Claude Code mod and a Pi extension. 
 
 ## Feature parity: the first rule
 
-pullywog does the same in every agent it supports: Claude Code (`hooks/`) and Pi (`pi/`). A change to what it shows or does lands in both in the same PR, with tests in each. A PR that changes one agent alone does not merge. A host that cannot do a feature at all is the only exception, and the PR names the missing host API. Pi 1.6.0 has no mouse hook inside the transcript, so the hover card and the click that tracks a reference are Claude Code only; `/track` and `Alt+A` stand in for the click.
+pullywog does the same in every agent it supports: Claude Code (`hooks/`) and Pi (`pi/`). A change to what it shows or does lands in both in the same PR, with tests in each. A PR that changes one agent alone does not merge. A host that cannot do a feature at all is the only exception, and the PR names the missing host API. Pi 1.6.0 has no mouse hook inside the transcript: `pi/pointer.ts` reads the mouse reports from stdin instead, so the hover card and the click that tracks a reference work in both.
 
 ## Check
 
@@ -25,7 +25,8 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 ## Pi
 
 - `pi/index.ts` is the Pi extension, loaded through `pi.extensions` in `package.json`. It draws the band with `ctx.ui.setWidget` above the editor, the dots with `pi.registerMarkdownTransformer`, and takes the keyboard with `ctx.ui.custom` on `Alt+A`.
-- `pi/prs.ts` holds what needs no Pi host: finding references, the query, the tracked list and the band's lines. It runs under `node --test` as it is.
+- `pi/prs.ts` holds what needs no Pi host: finding references, the query, the tracked list and the band's lines. `pi/card.ts` draws the hover card. Both run under `node --test` as they are.
+- `pi/pointer.ts` reads SGR mouse reports from `process.stdin` beside Pi's own reader, because Pi's fullscreen mode takes them before `onTerminalInput`. It finds the reference under the pointer in `TuiAltScreen.getScreenLines()` and shows the card with `tui.showOverlay({ nonCapturing: true })`. References in replies stay text, not links: Pi opens a link on any click.
 - Pi tests live in `pi/tests.ts`. A `*.test.ts` name would make `claude plugin test` run them with the Claude Code test kit.
 - Check with `npm ci`, `npm run typecheck:pi` and `npm run test:pi`. CI runs them after the Claude Code steps. `scripts/pi-e2e.py` drives a real Pi session.
 - Bump `version` in `package.json` with the one in `plugin.json`.
