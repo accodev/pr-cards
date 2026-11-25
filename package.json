@@ -1,5 +1,5 @@
 {
-  "name": "pullywog",
+  "name": "@accodev/pullywog",
   "version": "0.9.0",
   "description": "GitHub pull request tracking for Claude Code and Pi.",
   "license": "MIT",
@@ -9,6 +9,9 @@
   "files": ["pi/index.ts", "pi/prs.ts", "pi/card.ts", "pi/pointer.ts"],
   "pi": {
     "extensions": ["./pi/index.ts"]
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "typecheck:pi": "tsc -p pi",
