@@ -28,7 +28,8 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 - `pi/prs.ts` holds what needs no Pi host: finding references, the query, the tracked list and the band's lines. `pi/card.ts` draws the hover card. Both run under `node --test` as they are.
 - `pi/pointer.ts` reads SGR mouse reports from `process.stdin` beside Pi's own reader, because Pi's fullscreen mode takes them before `onTerminalInput`. It finds the reference under the pointer in `TuiAltScreen.getScreenLines()` and shows the card with `tui.showOverlay({ nonCapturing: true })`. References in replies stay text, not links: Pi opens a link on any click.
 - Pi tests live in `pi/tests.ts`. A `*.test.ts` name would make `claude plugin test` run them with the Claude Code test kit.
-- Check with `npm ci`, `npm run typecheck:pi` and `npm run test:pi`. CI runs them after the Claude Code steps. `scripts/pi-e2e.py` drives a real Pi session.
+- Check with `npm ci`, `npm run typecheck:pi` and `npm run test:pi`. CI runs them after the Claude Code steps.
+- `scripts/e2e.py` and `scripts/pi-e2e.py` drive real Claude Code and Pi sessions. `scripts/e2e_kit.py` holds what they share: a fake Anthropic Messages server with fixed replies, so no API key, and a pseudo-terminal on pywinpty (Windows) or ptyprocess. Each run gets a fresh agent config folder. The `e2e` workflow runs both on Linux for PRs that touch `hooks/`, `pi/` or the scripts. References point at pullywog's own PRs; no work repo goes into a script.
 - Bump `version` in `package.json` with the one in `plugin.json`.
 - The Pi extension is on npm as `@accodev/pullywog`. A published GitHub release runs `publish.yml`, which stages the version through npm trusted publishing; a maintainer approves it with 2FA on npmjs.com. After the approval, check that the `latest` dist-tag points at the new version.
 

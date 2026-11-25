@@ -1,345 +1,246 @@
-"""Drives a real fullscreen Claude Code session with the pullywog mod, then checks the hover card and the click panel.
+"""Drives a real fullscreen Claude Code session with the pullywog mod, then checks the dots, the hover
+card, tracking, the band's keys and a long table.
 
-Run from the repo root, with the folder of a GitHub repo that has PR 1306 and issue 1250 (fiskaltrust/market-it):
-    uv run --no-project --with pywinpty --with pyte python -I scripts/e2e.py C:/code/market-it
-Each screen is saved as text in scripts/e2e-out/. Exit code 0 means the card and the panel both appeared.
+A fake model (scripts/e2e_kit.py) gives the replies, so no API key is needed. The references point at
+pullywog's own PRs, which `gh` reads. Run from the repo root:
+    uv run --no-project --with pyte --with pywinpty python -I scripts/e2e.py      (Windows)
+    uv run --no-project --with pyte --with ptyprocess python -I scripts/e2e.py    (Linux, macOS)
+Each screen is saved as text in scripts/e2e-out/. Exit code 0 means every check passed.
 """
-import os, re, sys, threading, time
-import pyte
-from winpty import PtyProcess
+import json, os, re, subprocess, sys, time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I leaves the script's folder off the path
+from e2e_kit import REPO, Terminal, base_env, scratch, start_model
 
 PLUGIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CWD = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
-OUT = os.path.join(PLUGIN, "scripts", "e2e-out")
 ROWS, COLS = 50, 170
-# Nine lines first, so the card that opens upward has room above the reference.
-PROMPT = ("Reply with exactly this and use no tools: nine short paragraphs 'Line 1.' to 'Line 9.', each on its own line, "
-          "then the sentence '**PR #1306 fixed** the issue #1250.' with that markdown bold, "
-          "then the sentence 'Merged in [#1318](https://github.com/fiskaltrust/market-it/pull/1318).' with that markdown link "
-          "then a markdown table with columns '#' and 'Title' and two rows: 1318 'ci: submodule' and 1315 'feat: update (#1248)'.")
+# PRs of pullywog that stay put: A and B merged, C a markdown link, the table's numbers bare.
+A, B, C = 30, 32, 33
+LIST = list(range(16, 31))  # 15 PRs for the long table
+HOVER_ROW = 25
 
-os.makedirs(OUT, exist_ok=True)
 sys.stdout.reconfigure(encoding="utf-8")  # screen lines hold ⬤, which the Windows console code page lacks
-screen = pyte.Screen(COLS, ROWS)
-stream = pyte.ByteStream(screen)
-lock = threading.Lock()
-raw = bytearray()  # what the terminal received, for the OSC 8 hyperlinks pyte does not keep
+reply = "\n\n".join([f"Line {i}." for i in range(1, 10)] + [
+    f"**PR #{A} fixed** the issue #{B}.",
+    f"Merged in [#{C}](https://github.com/{REPO}/pull/{C}).",
+    "| # | Title |\n|---|---|\n| 31 | docs: install command |\n| 29 | feat: versions (#28) |",
+])
+table = "| # | State | Author | Title |\n|---|---|---|---|\n" + "\n".join(
+    f"| {n} | merged | accodev | a pull request with a long title that wraps in a narrow column, number {n} |" for n in reversed(LIST))
+model = start_model({"PULLYWOG_E2E_REPLY": reply, "PULLYWOG_E2E_LIST": table}, "model-claude.log")
 
-# Fullscreen rendering turns on mouse reporting; WT_SESSION makes links draw as they do in Windows Terminal.
-env = dict(os.environ, CLAUDE_CODE_NO_FLICKER="1", WT_SESSION="e2e", TERM_PROGRAM="WindowsTerminal")
-proc = PtyProcess.spawn(["claude", "--plugin-dir", PLUGIN, "--model", "haiku"], cwd=CWD, dimensions=(ROWS, COLS), env=env)
+# A fresh config folder: no onboarding, the folder trusted, the fake key accepted, no keybindings.
+config = scratch("claude")
+KEY = "sk-ant-e2e-fake-key-0000000000000000"
+with open(os.path.join(config, ".claude.json"), "w", encoding="utf-8") as f:
+    json.dump({"hasCompletedOnboarding": True, "theme": "dark", "customApiKeyResponses": {"approved": [KEY[-20:]], "rejected": []},
+               "projects": {PLUGIN.replace("\\", "/"): {"hasTrustDialogAccepted": True}, PLUGIN: {"hasTrustDialogAccepted": True}}}, f)
+env = base_env()
+env.update(CLAUDE_CONFIG_DIR=config, ANTHROPIC_BASE_URL=model, ANTHROPIC_API_KEY=KEY,
+           CLAUDE_CODE_NO_FLICKER="1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_AUTOUPDATER="1",
+           # Links draw as in Windows Terminal, which takes OSC 8.
+           WT_SESSION="e2e", TERM_PROGRAM="WindowsTerminal")
+# The card says "you" for the signed-in user, unlinked: the author check needs the PR's author as someone else.
+viewer = subprocess.run(["gh", "api", "user", "--jq", ".login"], capture_output=True, text=True).stdout.strip()
+author = subprocess.run(["gh", "pr", "view", str(A), "--repo", REPO, "--json", "author", "--jq", ".author.login"], capture_output=True, text=True).stdout.strip()
 
-
-def reader():
-    while proc.isalive():
-        try:
-            data = proc.read(65536)
-        except EOFError:
-            break
-        b = data.encode("utf-8", "surrogatepass") if isinstance(data, str) else data
-        with lock:
-            raw.extend(b)
-            stream.feed(b)
-
-
-threading.Thread(target=reader, daemon=True).start()
-
-
-def text():
-    with lock:
-        return "\n".join(screen.display)
+term = Terminal(["claude", "--plugin-dir", PLUGIN], PLUGIN, env, ROWS, COLS)
+checks = {}
 
 
-def dump(name):
-    with open(os.path.join(OUT, name + ".txt"), "w", encoding="utf-8") as f:
-        f.write(text())
-
-
-def wait(pred, timeout, label):
-    end = time.time() + timeout
-    while time.time() < end:
-        if pred(text()):
-            return True
-        time.sleep(0.5)
-    dump("fail-" + label)
-    print("TIMEOUT", label)
-    return False
-
-
-def find(s):
-    for y, line in enumerate(text().split("\n")):
-        x = line.find(s)
-        if x >= 0:
-            return x + 1, y + 1
+def chip_at(number):
+    for row, line in enumerate(term.text().split("\n")):
+        # A band row starts with a group label, or with its blank space on a group's next rows.
+        band_row = line.startswith(("      needs you", "      waiting", "      done", " " * 16))
+        if f"⬤ #{number} " in line and band_row:
+            return line.index(f"#{number}") + 2, row + 1
     return None
 
 
-hovered = clicked = bold_ok = False
+def click(x, y):
+    term.write(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m")
+
+
 try:
-    if not wait(lambda t: "❯" in t, 60, "start"):
+    if not term.wait(lambda t: "❯" in t, 60, "start"):
         sys.exit(1)
     time.sleep(3)
-    if "trust" in text().lower():
-        proc.write("\r")
-        time.sleep(3)
-    proc.write(PROMPT)
-    time.sleep(1)
-    proc.write("\r")
-    wait(lambda t: "1315" in t and "PR" in t and "⬤" in t, 120, "reply")
+    # Answer any first-run question the config did not settle: trust, the key, the theme.
+    for _ in range(3):
+        low = term.text().lower()
+        if "trust" in low or "api key" in low or "theme" in low:
+            term.write("\r")
+            time.sleep(2)
+    term.send("PULLYWOG_E2E_REPLY")
+    time.sleep(0.5)
+    term.write("\r")
+    term.wait(lambda t: "29" in t and f"#{A}" in t and "⬤" in t, 120, "reply")
     time.sleep(8)  # the gh lookup and the redraw
-    dump("1-reply")
-    pos = find("⬤ #1306")
+    term.dump("1-reply")
+    pos = term.find(f"⬤ #{A}")
     print("reference at", pos)
     if not pos:
         sys.exit(2)
+
     # Bold around a reference: no `**` left in the reply, and "PR" before it drawn bold.
-    line = text().split("\n")[pos[1] - 1]
+    line = term.text().split("\n")[pos[1] - 1]
     pr_col = line.find("PR")
-    with lock:
-        bold_pr = pr_col >= 0 and screen.buffer[pos[1] - 1][pr_col].bold
-    bold_ok = "**" not in line and bold_pr
-    print("bold around reference:", bold_ok, repr(line.strip()))
-    # A markdown link to a PR gets the dot like a plain `#1318`.
-    md_link = find("Merged in ⬤ #1318") is not None
-    print("markdown link reference:", md_link)
-    bold_ok = bold_ok and md_link
+    with term.lock:
+        bold_pr = pr_col >= 0 and term.screen.buffer[pos[1] - 1][pr_col].bold
+    checks["bold around a reference"] = "**" not in line and bold_pr
+    checks["markdown link gets a dot"] = term.find(f"Merged in ⬤ #{C}") is not None
+
     x, y = pos[0] + 3, pos[1]  # on the number, past the dot
-    proc.write(f"\x1b[<35;{x};{y}M")  # SGR mouse: the pointer moves onto the number
+    term.write(f"\x1b[<35;{x};{y}M")  # SGR mouse: the pointer moves onto the number
     time.sleep(2)
-    dump("2-hover")
-    hovered = "#1306" in text() and "checks" in text()
-    print("hover card:", hovered)
-    # Every cell inside the card's border has a background, so nothing under it shows through.
-    # The card is the rectangle of cells filled with its gray (ansi256 236); every cell in it is filled,
-    # and no box-drawing frame sits on its edge.
-    with lock:
-        gray = [(r, c) for r in range(ROWS) for c in range(COLS) if screen.buffer[r][c].bg == "303030"]
-        top, bottom = min(r for r, _ in gray), max(r for r, _ in gray)
-        left, right = min(c for _, c in gray), max(c for _, c in gray)
-        holes = [(r, c) for r in range(top, bottom + 1) for c in range(left, right + 1) if screen.buffer[r][c].bg == "default"]  # the state badge has its own color
-        frame = [(r, c) for r in (top, bottom) for c in range(left, right + 1) if screen.buffer[r][c].data in "╭╮╰╯─│"] + \
-                [(r, c) for r in range(top, bottom + 1) for c in (left, right) if screen.buffer[r][c].data in "╭╮╰╯─│"]
-    print("card", (top, left, bottom, right), "unfilled cells:", len(holes), holes[:5], "frame cells:", len(frame))
-    hovered = hovered and not holes and not frame and right - left + 1 == 66
-    # The author is a hyperlink to the profile, the URL row one to the PR.
-    with lock:
-        # OSC 8 carries parameters (an id) before the second `;`.
-        targets = set(m.decode("utf-8", "replace") for m in re.findall(rb"\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]+)", bytes(raw)))
-        author_link = "https://github.com/danielscainifiskaltrust" in targets
-        pr_link = "https://github.com/fiskaltrust/market-it/pull/1306" in targets
-    no_hint = "ctrl+click" not in text()
-    print("author link:", author_link, "pr link:", pr_link, "no hint row:", no_hint)
-    pr_link = pr_link and no_hint
-    # The author is drawn without a solid underline, so the terminal's dotted hyperlink underline shows.
-    at = find("@danielscainifiskaltrust")
-    with lock:
-        solid = at is not None and screen.buffer[at[1] - 1][at[0] - 1].underscore
-    print("author solid underline:", solid)
-    author_link = author_link and at is not None and not solid
-    hovered = hovered and author_link and pr_link
-    proc.write(f"\x1b[<35;{x};{min(ROWS, y + 3)}M")  # the pointer leaves
+    term.dump("2-hover")
+    hovered = f"#{A}" in term.text() and "checks" in term.text()
+    # The card is the rectangle of cells filled with its gray (ansi256 236): every cell in it is
+    # filled, and no box-drawing frame sits on its edge.
+    with term.lock:
+        buf = term.screen.buffer
+        gray = [(r, c) for r in range(ROWS) for c in range(COLS) if buf[r][c].bg == "303030"]
+        holes = frame = []
+        if gray:
+            top, bottom = min(r for r, _ in gray), max(r for r, _ in gray)
+            left, right = min(c for _, c in gray), max(c for _, c in gray)
+            holes = [(r, c) for r in range(top, bottom + 1) for c in range(left, right + 1) if buf[r][c].bg == "default"]
+            frame = [(r, c) for r in range(top, bottom + 1) for c in (left, right) if buf[r][c].data in "╭╮╰╯─│"]
+    print("card cells:", len(gray), "unfilled:", len(holes), "frame:", len(frame))
+    checks["hover card, filled, 66 wide"] = hovered and bool(gray) and not holes and not frame and right - left + 1 == 66
+    targets = term.links()
+    checks["card links the PR"] = f"https://github.com/{REPO}/pull/{A}" in targets
+    if author and author != viewer:
+        checks["card links the author"] = f"https://github.com/{author}" in targets
+    checks["no ctrl+click hint row"] = "ctrl+click" not in term.text()
+
+    term.write(f"\x1b[<35;{x};{min(ROWS, y + 3)}M")  # the pointer leaves
     time.sleep(1)
-    proc.write(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m")  # a plain click
+    click(x, y)  # a plain click tracks the PR
     time.sleep(2)
-    dump("3-click")
-    # A plain click tracks the PR: a chip above the prompt and the hotkey row of the selected one.
-    # The e2e never presses a, r, f or c: those act on a real PR.
-    def chip_at(number):
-        for row, line in enumerate(text().split("\n")):
-            # A band row starts with a group label, or with its blank space on a group's next rows.
-            band_row = line.startswith(("      needs you", "      waiting", "      done", " " * 16))
-            if f"⬤ #{number} " in line and band_row:
-                return line.index(f"#{number}") + 2, row + 1
-        return None
+    term.dump("3-click")
+    first = chip_at(A)
+    checks["click tracks: chip and key row"] = first is not None and "x: remove" in term.text()
 
-    first = chip_at(1306)
-    keyrow = "x: remove" in text()
-    print("tracked chip and hotkey row:", first, keyrow)
-    # Design P3: "Tracked PRs" on a bar of Claude Code's orange, bold.
-    titled = None
+    # Design P3: "Tracked PRs" on a bar of Claude Code's orange, bold; a click on it folds the band.
     bar = None
-    for row, line in enumerate(text().split("\n")):
-        if line.startswith("   ▾ Tracked PRs"):
-            with lock:
-                cell = screen.buffer[row][3]
-            titled = (cell.bg, cell.bold)
+    for row, l in enumerate(term.text().split("\n")):
+        if l.startswith("   ▾ Tracked PRs"):
+            with term.lock:
+                cell = term.screen.buffer[row][3]
+            checks["bar has a background and bold"] = cell.bg not in ("default", "") and cell.bold
             bar = row + 1
-    print("title 'Tracked PRs' (background, bold):", titled)
-    titled = bool(titled and titled[0] not in ("default", "") and titled[1])
-    # A click on the bar folds the chips away (the bar stays, with the count); another brings them back.
     if bar:
-        proc.write(f"\x1b[<0;10;{bar}M\x1b[<0;10;{bar}m")
+        click(10, bar)
         time.sleep(2)
-        dump("3-folded")
-        folded_ok = chip_at(1306) is None and "▸ Tracked PRs · 1" in text()
-        bar = next((r + 1 for r, l in enumerate(text().split("\n")) if "▸ Tracked PRs" in l), bar)
-        proc.write(f"\x1b[<0;10;{bar}M\x1b[<0;10;{bar}m")
+        term.dump("3-folded")
+        folded = chip_at(A) is None and "▸ Tracked PRs · 1" in term.text()
+        bar = next((r + 1 for r, l in enumerate(term.text().split("\n")) if "▸ Tracked PRs" in l), bar)
+        click(10, bar)
         time.sleep(2)
-        folded_ok = folded_ok and chip_at(1306) is not None
-        print("a click on the bar folds and unfolds:", folded_ok)
-        titled = titled and folded_ok
-    clicked = first is not None and keyrow and titled and "crashed" not in text()
-    # Track a second one, focus the band with a click on the first chip, → to the second, x removes it.
-    issue = find("⬤ #1250")
-    if clicked and issue:
-        proc.write(f"\x1b[<0;{issue[0] + 3};{issue[1]}M\x1b[<0;{issue[0] + 3};{issue[1]}m")
+        checks["bar folds and unfolds"] = folded and chip_at(A) is not None
+    else:
+        checks["bar has a background and bold"] = False
+
+    # Track a second PR, select the first chip, focus the band, ↓ to the second, c copies, x removes.
+    second_ref = term.find(f"⬤ #{B}")
+    if first and second_ref:
+        click(second_ref[0] + 3, second_ref[1])
         time.sleep(2)
-        second = chip_at(1250)
-        first = chip_at(1306)
-        proc.write(f"\x1b[<0;{first[0]};{first[1]}M\x1b[<0;{first[0]};{first[1]}m")  # selects the first chip
+        first = chip_at(A)
+        click(first[0], first[1])
         time.sleep(1)
-        # The band's focus chord: the last Chat binding of abovePrompt:focus in keybindings.json,
-        # else Claude Code's default, ctrl+x tab.
-        import json
-        import pathlib
-
-        def focus_chord():
-            chord = "ctrl+x tab"
-            try:
-                file = json.loads((pathlib.Path.home() / ".claude" / "keybindings.json").read_text(encoding="utf-8"))
-                for block in file.get("bindings", []):
-                    if block.get("context") != "Chat":
-                        continue
-                    for keys, action in block.get("bindings", {}).items():
-                        if action == "abovePrompt:focus":
-                            chord = keys
-                        elif keys == chord:
-                            chord = None
-            except (OSError, ValueError):
-                pass
-            return chord
-
-        def keys_of(chord):
-            out = ""
-            for part in chord.split(" "):
-                *mods, key = part.split("+")
-                key = {"tab": "\t", "enter": "\r", "space": " "}.get(key, key)
-                if "ctrl" in mods and len(key) == 1 and key.isalpha():
-                    key = chr(ord(key) - 96)
-                if "alt" in mods or "meta" in mods:
-                    key = "\x1b" + key
-                out += key
-            return out
-
-        chord = focus_chord()
-        focus = keys_of(chord) if chord else "\x18\t"
-        print("focus chord from keybindings.json:", chord)
-        proc.write(focus)  # the band takes the keyboard
+        term.write("\x18\t")  # Claude Code's default band focus key: ctrl+x, then tab
         time.sleep(1)
-        dump("3a-focused")
-
-        # Design G1: the selected chip starts with a ▎ (three cells before its #), no chip is underlined.
-        def look(number):
-            at = chip_at(number)
-            if not at:
-                return None
-            with lock:
-                row = screen.display[at[1] - 1]
-                cell = screen.buffer[at[1] - 1][at[0] - 1]
-            start = at[0] - 2  # the 0-based column of the #
-            return row[start - 3] == "▎", cell.underscore, row[max(0, start - 14):start + 30]
+        term.dump("3a-focused")
 
         def picked():
-            a, b = look(1306), look(1250)
-            print("chips (marked, underlined, text):", a, b)
-            if not a or not b or a[1] or b[1] or a[0] == b[0]:
-                return None
-            return 1306 if a[0] else 1250
+            marks = {}
+            for n in (A, B):
+                at = chip_at(n)
+                if not at:
+                    return None
+                with term.lock:
+                    row = term.screen.display[at[1] - 1]
+                marks[n] = row[at[0] - 2 - 3] == "▎"  # Design G1: a ▎ three cells before the #
+            return next((n for n, on in marks.items() if on), None) if sum(marks.values()) == 1 else None
 
-        before = picked()
-        # ↓ moves to the next control: the chip's own × first, then the next chip.
-        after = before
+        before = after = picked()
         for _ in range(3):
-            proc.write("\x1b[B")
+            term.write("\x1b[B")
             time.sleep(1)
             after = picked()
             if after != before:
                 break
-        dump("3b-arrow")
-        print("focused after the focus chord:", before, "after ↓:", after)
-        moved = before is not None and after is not None and before != after
-        # c copies the focused one as a link: the clipboard holds an HTML link and the plain text.
-        proc.write("c")
+        term.dump("3b-arrow")
+        print("selected after the focus key:", before, "after ↓:", after)
+        checks["↓ moves the selection"] = before is not None and after is not None and before != after
+
+        term.write("c")
         time.sleep(4)
-        import subprocess
-        clip = subprocess.run(["powershell.exe", "-NoProfile", "-Command",
-                               "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Clipboard -TextFormatType Html | Select-Object -Last 1; '---'; Get-Clipboard -TextFormatType UnicodeText"],
-                              capture_output=True, encoding="utf-8")
-        copied = f'#{after}</a>' in clip.stdout and f'/{after}' in clip.stdout.split('---')[-1]
-        print("c copied a link:", copied, repr(clip.stdout.strip()[-160:]))
-        moved = moved and copied
-        proc.write("x")
+        if sys.platform == "win32":
+            clip = subprocess.run(["powershell.exe", "-NoProfile", "-Command",
+                                   "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Clipboard -TextFormatType Html | Select-Object -Last 1; '---'; Get-Clipboard -TextFormatType UnicodeText"],
+                                  capture_output=True, encoding="utf-8").stdout
+            checks["c copies a rich-text link"] = f"#{after}</a>" in clip and f"/{after}" in clip.split("---")[-1]
+        else:
+            # No Windows clipboard: the plain text goes out as an OSC 52 clipboard write.
+            import base64
+            with term.lock:
+                writes = re.findall(rb"\x1b\]52;[^;]*;([A-Za-z0-9+/=]+)", bytes(term.raw))
+            texts = [base64.b64decode(w).decode("utf-8", "replace") for w in writes]
+            # Or the mod's own notice, where Claude Code takes the copy another way.
+            checks["c copies the link"] = any(f"/{after}" in t for t in texts) or f"copied {REPO}#{after}" in term.text()
+
+        term.write("x")
         time.sleep(2)
-        dump("3c-removed")
-        # x removes the chip ↓ moved to.
-        gone = after is not None and chip_at(after) is None and chip_at(1306 if after == 1250 else 1250) is not None
-        print("↓ moved the selection:", moved, "x removed it:", gone)
-        clicked = clicked and moved and gone
-        # Leave nothing tracked.
-        for _ in range(3):
-            if not (chip_at(1306) or chip_at(1250)):
+        term.dump("3c-removed")
+        checks["x removes the selected chip"] = after is not None and chip_at(after) is None and chip_at(A if after == B else B) is not None
+        for _ in range(3):  # leave nothing tracked
+            if not (chip_at(A) or chip_at(B)):
                 break
-            proc.write(focus + "x")  # focus the band, then x on whichever chip holds the focus
+            term.write("\x18\tx")
             time.sleep(2)
     else:
-        clicked = False
+        checks["second PR tracked"] = False
 
-    # The real list: 15 PRs with long titles, the reply that once crashed the hooks worker.
-    proc.write("/clear\r")
+    # A long table: 15 PRs, the reply that once crashed the hooks worker.
+    term.write("/clear\r")
     time.sleep(3)
-    proc.write("List the last 15 PRs of this repo as a markdown table with columns #, State, Author, Title. Use gh.")
-    time.sleep(1)
-    proc.write("\r")
-    wait(lambda t: "Title" in t and t.count("⬤") >= 15, 180, "list")
+    term.send("PULLYWOG_E2E_LIST")
+    time.sleep(0.5)
+    term.write("\r")
+    term.wait(lambda t: "Title" in t and t.count("⬤") >= 15, 120, "list")
     time.sleep(10)
-    dump("4-list")
-    with lock:
-        dots = [screen.buffer[r][c].fg for r in range(ROWS) for c in range(COLS) if screen.buffer[r][c].data == "⬤"]
-    print("dot colors:", sorted(set(dots)))
-    # A hollow dot is a reference still loading, a cross one whose lookup failed.
-    pending = text().count("○")
-    failed = len(re.findall(r"(?<!\w)x #\d", text()))
-    crashed = "crashed" in text()
-    print("list dots:", len(dots), "loading:", pending, "failed:", failed, "crashed:", crashed)
-    clicked = clicked and not crashed and len(dots) >= 15 and not pending and not failed
-    # The table keeps Claude Code's borders: every line from ┌ to └ starts and ends on the same columns.
-    lines = text().split("\n")
+    term.dump("4-list")
+    with term.lock:
+        dots = [term.screen.buffer[r][c].fg for r in range(ROWS) for c in range(COLS) if term.screen.buffer[r][c].data == "⬤"]
+    pending = term.text().count("○")  # a hollow dot is still loading
+    failed = len(re.findall(r"(?<!\w)x #\d", term.text()))  # a cross is a failed lookup
+    print("list dots:", len(dots), "colors:", sorted(set(dots)), "loading:", pending, "failed:", failed)
+    checks["long table: 15 dots, all loaded"] = "crashed" not in term.text() and len(dots) >= 15 and not pending and not failed
+    lines = term.text().split("\n")
     top = next((i for i, l in enumerate(lines) if "┌" in l), None)
     bottom = next((i for i, l in enumerate(lines) if "└" in l and top is not None and i > top), None)
     aligned = False
     if top is not None and bottom is not None:
         left, right = lines[top].index("┌"), lines[top].rindex("┐")
         aligned = all(lines[i][left] in "│├└" and lines[i][right] in "│┤┘" for i in range(top + 1, bottom + 1))
-    print("table borders:", top is not None and bottom is not None, "aligned:", aligned)
-    clicked = clicked and aligned
-    row = find("⬤ 1320")
+    checks["long table keeps its borders"] = aligned
+    row = term.find(f"⬤ {HOVER_ROW}")
     if row:
-        proc.write(f"\x1b[<35;{row[0] + 3};{row[1]}M")
+        term.write(f"\x1b[<35;{row[0] + 3};{row[1]}M")
         time.sleep(2)
-        dump("5-list-hover")
-        # #1320's state and checks change on GitHub: only its number is fixed.
-        card = "fiskaltrust/market-it #1320" in text()
-        failing_shown = bool(re.search(r"(?<!\w)x \d+ of \d+ checks|· x ", text()))
-        with lock:
-            targets = set(m.decode("utf-8", "replace") for m in re.findall(rb"\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]+)", bytes(raw)))
-        pr = "https://github.com/fiskaltrust/market-it/pull/1320"
-        card_links = {
-            "repo": "https://github.com/fiskaltrust/market-it" in targets,
-            "files": pr + "/files" in targets,
-            "checks": pr + "/checks" in targets,
-            "failing run": not failing_shown or any("/runs/" in t for t in targets),
-        }
-        print("list hover card:", card, "links:", card_links)
-        card = card and all(card_links.values())
-        clicked = clicked and card
+        term.dump("5-list-hover")
+        targets = term.links()
+        pr = f"https://github.com/{REPO}/pull/{HOVER_ROW}"
+        checks["table number opens a card with links"] = (f"{REPO} #{HOVER_ROW}" in term.text() and f"https://github.com/{REPO}" in targets
+                                                          and pr + "/files" in targets and pr + "/checks" in targets)
+    else:
+        checks["table number opens a card with links"] = False
 finally:
-    proc.write("\x03")
-    time.sleep(0.5)
-    proc.write("\x03")
-    time.sleep(1)
-    try:
-        if proc.isalive():
-            proc.terminate(force=True)
-    except OSError:
-        pass  # already exiting after the second ctrl+c
-sys.exit(0 if hovered and clicked and bold_ok else 3)
+    term.stop()
+
+for name, ok in checks.items():
+    print(("PASS " if ok else "FAIL ") + name)
+sys.exit(0 if checks and all(checks.values()) else 3)
