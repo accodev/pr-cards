@@ -41,7 +41,9 @@ function color256(n) {
   return `rgb(${step(Math.floor(c / 36))},${step(Math.floor(c / 6) % 6)},${step(c % 6)})`
 }
 
-const escape = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+// Maple Mono has no ⬤: a browser takes it from a wider fallback font and shifts the rest of the
+// row, where a terminal fits it in one cell. ● has the same look and fits.
+const escape = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/⬤/g, '●')
 
 // A line of text with SGR codes as HTML spans; OSC 8 links draw as their text.
 function ansiToHtml(line) {
