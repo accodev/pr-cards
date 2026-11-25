@@ -1,6 +1,10 @@
 # AGENTS.md
 
-pullywog (named pr-cards before 0.8.0) is a Claude Code mod. It draws GitHub pull request references in the transcript as chips, with a hover card per PR. The design and open questions are in `docs/handover.md`.
+pullywog (named pr-cards before 0.8.0) is a Claude Code mod and a Pi extension. It draws GitHub pull request references in the transcript as chips, with a hover card per PR, and keeps tracked PRs in a band above the prompt. The design and open questions are in `docs/handover.md`.
+
+## Feature parity: the first rule
+
+pullywog does the same in every agent it supports: Claude Code (`hooks/`) and Pi (`pi/`). A change to what it shows or does lands in both in the same PR, with tests in each. A PR that changes one agent alone does not merge. A host that cannot do a feature at all is the only exception, and the PR names the missing host API. Pi 1.6.0 has no mouse hook inside the transcript, so the hover card and the click that tracks a reference are Claude Code only; `/track` and `Alt+A` stand in for the click.
 
 ## Check
 
@@ -17,6 +21,14 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 - Register each event once, or each time with its own matcher. A second `on` of the same event without one throws.
 - No `import()`, `require`, Node or DOM. Use `$.process`, `$.http`, `$.store` and `$.clock`.
 - Colors come from `ansi256(n)` with n below 16 on the terminal, or theme keys elsewhere. Never hex.
+
+## Pi
+
+- `pi/index.ts` is the Pi extension, loaded through `pi.extensions` in `package.json`. It draws the band with `ctx.ui.setWidget` above the editor, the dots with `pi.registerMarkdownTransformer`, and takes the keyboard with `ctx.ui.custom` on `Alt+A`.
+- `pi/prs.ts` holds what needs no Pi host: finding references, the query, the tracked list and the band's lines. It runs under `node --test` as it is.
+- Pi tests live in `pi/tests.ts`. A `*.test.ts` name would make `claude plugin test` run them with the Claude Code test kit.
+- Check with `npm ci`, `npm run typecheck:pi` and `npm run test:pi`. CI runs them after the Claude Code steps. `scripts/pi-e2e.py` drives a real Pi session.
+- Bump `version` in `package.json` with the one in `plugin.json`.
 
 ## Types
 

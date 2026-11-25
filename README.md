@@ -1,6 +1,6 @@
 # pullywog
 
-A Claude Code mod that turns GitHub pull request and issue references in Claude's replies into live links.
+A Claude Code mod and a [Pi](https://pi.dev) extension that turns GitHub pull request and issue references in the agent's replies into live links.
 
 ![A Claude Code reply with state dots on each PR and issue reference, a bordered table, and the hover card of a PR showing its state, author, size, checks, reviews and threads](docs/screenshot.png)
 
@@ -36,6 +36,20 @@ claude plugin marketplace remove pr-cards
 
 The tracked lists live in the plugin's own store file under `~/.claude/plugins/store/`. To keep them, copy `pr-cards_pr-cards-*.json` over the new `pullywog_pullywog-*.json` once pullywog has run.
 
+## Pi
+
+```sh
+pi install git:github.com/accodev/pullywog
+```
+
+Run `/reload` in an open session to load it. Pi draws the transcript itself and gives extensions no hook for the mouse inside it, so the Pi extension differs from the Claude Code mod in three ways:
+
+- References in replies get the state dot and become links. A hover opens no card.
+- `/track #1234` (or `owner/repo#1234`, or a GitHub URL) puts a PR in the band; with no argument it offers the references of this session's replies. `/untrack` takes it out.
+- `Alt+A` moves to the band: arrows pick a chip, the same keys act on it (`a` approve, press twice; `r` request changes; `f` re-run failed checks; `o` open; `c` copy the link; `x` remove), Esc goes back. In Pi's fullscreen mode (`tuiMode`, the default) a click on the bar folds the band, and a click on a chip selects it.
+
+The band, its groups and its chips match the Claude Code mod. Pi has no orange theme key: the bar takes the theme's accent color. The Pi extension keeps the tracked lists in `~/.pi/agent/pullywog.json`, apart from Claude Code's. Pi's `settings.json` takes `trackedBand`, `bandPerRow` and `shareTracked` (below) under a `pullywog` key, for example `"pullywog": { "bandPerRow": 2 }`.
+
 ## Settings
 
 `cardStyle` picks the hover card: `card` (the default) or `github`.
@@ -58,6 +72,10 @@ claude --plugin-dir .            # run Claude Code with this checkout
 claude plugin validate .
 claude plugin test .
 uv run --no-project --with pywinpty --with pyte python -I scripts/e2e.py C:/code/market-it
+npm ci
+npm run typecheck:pi
+npm run test:pi
+uv run --no-project --with pywinpty --with pyte python -I scripts/pi-e2e.py C:/code/market-it
 ```
 
-`scripts/e2e.py` drives a real fullscreen session in a pseudo-terminal, hovers and clicks references, and checks the screen. The design notes are in `docs/handover.md`, the repo rules in `AGENTS.md`.
+`scripts/e2e.py` drives a real fullscreen session in a pseudo-terminal, hovers and clicks references, and checks the screen. `scripts/pi-e2e.py` does the same for Pi: it tracks a PR, moves to the band, checks the dots in a reply, and removes the PR. The design notes are in `docs/handover.md`, the repo rules in `AGENTS.md`.
