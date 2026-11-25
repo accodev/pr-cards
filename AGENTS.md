@@ -31,7 +31,7 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 - Check with `npm ci`, `npm run typecheck:pi` and `npm run test:pi`. CI runs them after the Claude Code steps.
 - `scripts/e2e.py` and `scripts/pi-e2e.py` drive real Claude Code and Pi sessions. `scripts/e2e_kit.py` holds what they share: a fake Anthropic Messages server with fixed replies, so no API key, and a pseudo-terminal on pywinpty (Windows) or ptyprocess. Each run gets a fresh agent config folder. The `e2e` workflow runs both on Linux for PRs that touch `hooks/`, `pi/` or the scripts. References point at pullywog's own PRs; no work repo goes into a script.
 - Bump `version` in `package.json` with the one in `plugin.json`.
-- The Pi extension is on npm as `@accodev/pullywog`. A published GitHub release runs `publish.yml`, which stages the version through npm trusted publishing; a maintainer approves it with 2FA on npmjs.com. After the approval, check that the `latest` dist-tag points at the new version.
+- The Pi extension is on npm as `@accodev/pullywog`. `publish.yml` stages each new version through npm trusted publishing; a maintainer approves it with 2FA on npmjs.com. After the approval, check that the `latest` dist-tag points at the new version.
 
 ## Types
 
@@ -40,8 +40,12 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 ## Ship
 
 - Conventional Commits. One PR per change, CI green, rebase merge.
-- Bump `version` in `.claude-plugin/plugin.json` on a behavior change.
-- Tag each release with `claude plugin tag --push`, which makes `pullywog--v<version>`. Install and update read these tags to give an older Claude Code the newest version that fits its `engines` range.
+- Size each PR as a release and bump `version` in `plugin.json` and `package.json` in the same PR:
+  - MAJOR: a breaking change, marked `!` in the type. Examples: a removed or renamed setting or key, a changed command, a raised `engines["claude-code"]` or Pi peer range.
+  - MINOR: `feat`, something users can see or do that is new.
+  - PATCH: `fix` or `perf`.
+  - No bump: `docs`, `ci`, `test`, `chore` or `refactor` with no change users see.
+- The merge of a PR that raises the version runs `publish.yml`: it tags `pullywog--v<version>` with `claude plugin tag --push`, creates the GitHub release and stages the version on npm. Install and update read these tags to give an older Claude Code the newest version that fits its `engines` range. Do not tag or release by hand.
 - Raise `engines["claude-code"]` in `plugin.json` only when a release needs a newer build for the whole plugin. Keep it out of `marketplace.json`: Claude Code 2.0.15 to 2.1.75 reject a marketplace whose entry has it.
 - A feature on a newer API switches itself off on older builds. Wrap a new `$` call in try/catch, because a missing call throws a TypeError where it is made. Hook a new event through a pattern such as `prompt.*` and test `next.event`, because an unknown event name refuses the whole module.
 - README images come from `scripts/screenshots.mjs`, which draws fixed scenes with `pi/prs.ts` and `pi/card.ts` on made-up repos and people. The `screenshots` workflow renders them on `main` and pushes them to the `screenshots` branch. No real repo, PR or person goes into an image.
