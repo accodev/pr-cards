@@ -147,7 +147,7 @@ try:
     def chip_at(number):
         for row, line in enumerate(text().split("\n")):
             # A band row starts with a group label, or with its blank space on a group's next rows.
-            band_row = line.startswith(("  needs you", "  waiting", "  done", " " * 12))
+            band_row = line.startswith(("      needs you", "      waiting", "      done", " " * 16))
             if f"⬤ #{number} " in line and band_row:
                 return line.index(f"#{number}") + 2, row + 1
         return None
