@@ -11,13 +11,24 @@ export type Item = {
   // PR: OPEN | MERGED | CLOSED | DRAFT. Issue: OPEN | COMPLETED | NOT_PLANNED.
   state: string
   author: string
+  // `opened 2 days ago`, `merged 3 hours ago`...
+  when: string
   created?: string
+  head?: string
+  base?: string
+  additions?: number
+  deletions?: number
+  changedFiles?: number
   review?: string
   checks?: Checks
-  // The run of each failing check, for `f`.
+  // The failing checks, each with the page of its run.
   failing?: { name: string; url?: string }[]
+  approvedBy?: string[]
+  changesBy?: string[]
   // The users whose review is asked for and not given yet.
   requested?: string[]
+  threads?: { path: string; line: number | null }[]
+  comments?: number
 }
 export type Entry = { item?: Item; error?: string; missing?: boolean; at: number; loading: boolean }
 export type Ref = { repo: string | null; number: number }
@@ -52,35 +63,65 @@ export function findRefs(md: string): Found[] {
 }
 
 // The 16 palette slots, as the Claude Code mod draws them: a terminal theme recolors them.
-export const SGR = { open: 32, merged: 35, closed: 31, draft: 90, warn: 33, link: 34, dim: 90 } as const
+export const SGR = { open: 32, merged: 35, closed: 31, draft: 90, warn: 33, link: 34, dim: 90, code: 36, black: 30 } as const
 export type Tone = keyof typeof SGR
 export const paint = (tone: Tone, text: string) => `\x1b[${SGR[tone]}m${text}\x1b[39m`
 const STATE_TONE: Record<string, Tone> = { OPEN: 'open', DRAFT: 'draft', MERGED: 'merged', CLOSED: 'closed', COMPLETED: 'merged', NOT_PLANNED: 'draft' }
 export const toneOf = (item: Item): Tone => STATE_TONE[item.state] ?? 'dim'
 export const DOT = '⬤'
 
-// Each reference GitHub knows becomes a link with a dot in its state's color in front. One still
-// loading, unknown or in a folder without a repo stays as written.
+// Each reference gets a dot, as the Claude Code mod draws them: the state's color once GitHub
+// answered, hollow while loading, a red x when the lookup failed. A URL reads `owner/repo#N`. The
+// reference stays text, not a link: Pi opens a link on any click, and a plain click tracks the PR.
+// One GitHub does not know, or in a folder without a repo, stays as written.
 export function decorate(md: string, lookup: (r: Ref) => Entry | undefined): string {
   let out = ''
   let at = 0
   for (const f of findRefs(md)) {
-    const item = lookup(f)?.item
-    if (!item) continue
-    const text = f.url ? `${item.repo}#${item.number}` : md.slice(f.start, f.end)
-    out += md.slice(at, f.start) + `${paint(toneOf(item), '●')} [${text}](${item.url})`
+    const entry = lookup(f)
+    if (!entry || entry.missing) continue
+    const item = entry.item
+    const dot = item ? paint(toneOf(item), DOT) : entry.error ? paint('closed', 'x') : paint('dim', '○')
+    const text = f.url ? `${f.repo}#${f.number}` : md.slice(f.start, f.end)
+    out += md.slice(at, f.start) + `${dot} ${paint('link', text)}`
     at = f.end
   }
   return out + md.slice(at)
 }
 
+// The reference a decorated reply shows at column `col` of a screen line: the dot, a space, then the
+// reference. The dot tells a decorated reference from the same text in the editor or a code block.
+export function refAt(line: string, col: number): Ref | null {
+  // One character per cell, so string offsets are columns.
+  const text = plainCells(line).join('')
+  for (const m of text.matchAll(/(?:⬤|○|x) ((?:([\w.-]+\/[\w.-]+))?#(\d+))\b/g)) {
+    if (col >= m.index! && col < m.index! + m[0].length) return { repo: m[2] ?? null, number: Number(m[3]) }
+  }
+  return null
+}
+
+// A screen line as one character per cell: escape sequences dropped, a wide character's second cell
+// a space. Pi's screen lines carry SGR colors and OSC 8 links.
+export function plainCells(line: string): string[] {
+  const bare = line.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?<>]*[ -/]*[@-~]|\x1b[@-_]/g, '')
+  const cells: string[] = []
+  for (const ch of bare) {
+    cells.push(ch)
+    if (/[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]|[\u{1f300}-\u{1faff}]/u.test(ch)) cells.push(' ')
+  }
+  return cells
+}
+
+// The Claude Code mod's query: the band and the card need the same fields.
 export const FIELDS = `
   __typename
-  ... on PullRequest { number title url state isDraft author { login } reviewDecision createdAt
+  ... on PullRequest { number title url state isDraft author { login } additions deletions changedFiles reviewDecision createdAt mergedAt closedAt headRefName baseRefName
     statusCheckRollup { contexts(first: 100) { totalCount checkRunCountsByState { state count } statusContextCountsByState { state count }
       nodes { __typename ... on CheckRun { name conclusion detailsUrl } ... on StatusContext { context state targetUrl } } } }
-    reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } } }
-  ... on Issue { number title url state stateReason author { login } createdAt }`
+    latestReviews(first: 20) { nodes { state author { login } } }
+    reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
+    reviewThreads(first: 100) { nodes { isResolved path line } } }
+  ... on Issue { number title url state stateReason author { login } comments { totalCount } createdAt closedAt }`
 
 export function query(repo: string, numbers: number[]) {
   const [owner, name] = repo.split('/')
@@ -91,24 +132,45 @@ type Count = { state: string; count: number }
 export type Raw = {
   __typename: 'PullRequest' | 'Issue'
   number: number; title: string; url: string; state: string; isDraft?: boolean; stateReason?: string | null
-  author?: { login: string } | null; reviewDecision?: string | null; createdAt?: string
+  author?: { login: string } | null; additions?: number; deletions?: number; changedFiles?: number; reviewDecision?: string | null
+  createdAt?: string; mergedAt?: string | null; closedAt?: string | null; headRefName?: string | null; baseRefName?: string | null
   statusCheckRollup?: {
     contexts: {
       totalCount: number; checkRunCountsByState?: Count[]; statusContextCountsByState?: Count[]
       nodes?: { __typename: string; name?: string; conclusion?: string | null; detailsUrl?: string | null; context?: string; state?: string; targetUrl?: string | null }[]
     }
   } | null
+  latestReviews?: { nodes: { state: string; author?: { login: string } | null }[] }
   reviewRequests?: { nodes: { requestedReviewer?: { login?: string } | null }[] }
+  reviewThreads?: { nodes: { isResolved: boolean; path: string; line: number | null }[] }
+  comments?: { totalCount: number }
 }
 
 const OK = ['SUCCESS', 'NEUTRAL', 'SKIPPED']
 const FAILED = ['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'STALE']
 
+export function ago(iso: string | null | undefined, now = Date.now()) {
+  if (!iso) return ''
+  const minutes = Math.max(0, Math.round((now - Date.parse(iso)) / 60_000))
+  const [n, unit] = minutes < 60 ? [minutes, 'minute'] : minutes < 1440 ? [Math.round(minutes / 60), 'hour'] : [Math.round(minutes / 1440), 'day']
+  return n === 0 ? 'just now' : `${n} ${unit}${n === 1 ? '' : 's'} ago`
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+// `Nov 18`, as GitHub dates a card; the year only when it is not this one.
+export function day(iso?: string) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const year = d.getUTCFullYear() === new Date().getUTCFullYear() ? '' : `, ${d.getUTCFullYear()}`
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}${year}`
+}
+
 export function toItem(repo: string, raw: Raw): Item {
   const author = raw.author?.login ?? 'ghost'
   if (raw.__typename === 'Issue') {
     const state = raw.state === 'OPEN' ? 'OPEN' : raw.stateReason === 'NOT_PLANNED' ? 'NOT_PLANNED' : 'COMPLETED'
-    return { kind: 'issue', number: raw.number, repo, title: raw.title, url: raw.url, state, author, created: raw.createdAt }
+    const when = state === 'OPEN' ? `opened ${ago(raw.createdAt)}` : `closed ${ago(raw.closedAt)}`
+    return { kind: 'issue', number: raw.number, repo, title: raw.title, url: raw.url, state, author, when, created: raw.createdAt, comments: raw.comments?.totalCount ?? 0 }
   }
   const contexts = raw.statusCheckRollup?.contexts
   const counts = [...(contexts?.checkRunCountsByState ?? []), ...(contexts?.statusContextCountsByState ?? [])]
@@ -116,13 +178,20 @@ export function toItem(repo: string, raw: Raw): Item {
   const total = contexts?.totalCount ?? 0
   const ok = sum(OK)
   const failed = sum(FAILED)
+  const reviews = raw.latestReviews?.nodes ?? []
+  const by = (s: string) => reviews.filter((r) => r.state === s).map((r) => r.author?.login ?? 'ghost')
+  const state = raw.state === 'OPEN' && raw.isDraft ? 'DRAFT' : raw.state
+  const when = state === 'MERGED' ? `merged ${ago(raw.mergedAt)}` : state === 'CLOSED' ? `closed ${ago(raw.closedAt)}` : `opened ${ago(raw.createdAt)}`
   return {
-    kind: 'pr', number: raw.number, repo, title: raw.title, url: raw.url,
-    state: raw.state === 'OPEN' && raw.isDraft ? 'DRAFT' : raw.state, author, created: raw.createdAt,
+    kind: 'pr', number: raw.number, repo, title: raw.title, url: raw.url, state, author, when,
+    created: raw.createdAt, head: raw.headRefName ?? undefined, base: raw.baseRefName ?? undefined,
+    additions: raw.additions, deletions: raw.deletions, changedFiles: raw.changedFiles,
     review: raw.reviewDecision ?? undefined,
     checks: { ok, failed, pending: Math.max(0, total - ok - failed), total },
     failing: (contexts?.nodes ?? []).filter((c) => FAILED.includes(c.conclusion ?? c.state ?? '')).map((c) => ({ name: c.name ?? c.context ?? '?', url: c.detailsUrl ?? c.targetUrl ?? undefined })),
+    approvedBy: by('APPROVED'), changesBy: by('CHANGES_REQUESTED'),
     requested: (raw.reviewRequests?.nodes ?? []).flatMap((r) => r.requestedReviewer?.login ?? []),
+    threads: (raw.reviewThreads?.nodes ?? []).filter((t) => !t.isResolved).map((t) => ({ path: t.path, line: t.line })),
   }
 }
 
