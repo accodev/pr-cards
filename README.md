@@ -44,7 +44,7 @@ The tracked lists live in the plugin's own store file under `~/.claude/plugins/s
 ## Pi
 
 ```sh
-pi install git:github.com/accodev/pullywog
+pi install npm:@accodev/pullywog
 ```
 
 Run `/reload` in an open session to load it. In Pi's fullscreen mode (`tuiMode`, the default) the extension works as the Claude Code mod: the dots, the card on hover, a plain click to track and Ctrl+click to open. Pi gives extensions no mouse hook in its transcript, so pullywog reads the mouse reports from the terminal input beside Pi, as `@narumitw/pi-inline` does. Pi's regular mode, tmux, Zellij and Screen send none: there the dots show, and the commands below stand in for the click.

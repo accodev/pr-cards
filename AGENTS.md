@@ -30,6 +30,7 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 - Pi tests live in `pi/tests.ts`. A `*.test.ts` name would make `claude plugin test` run them with the Claude Code test kit.
 - Check with `npm ci`, `npm run typecheck:pi` and `npm run test:pi`. CI runs them after the Claude Code steps. `scripts/pi-e2e.py` drives a real Pi session.
 - Bump `version` in `package.json` with the one in `plugin.json`.
+- The Pi extension is on npm as `@accodev/pullywog`. A published GitHub release runs `publish.yml`, which stages the version through npm trusted publishing; a maintainer approves it with 2FA on npmjs.com. After the approval, check that the `latest` dist-tag points at the new version.
 
 ## Types
 
