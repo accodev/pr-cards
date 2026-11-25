@@ -1,25 +1,30 @@
 # pullywog
 
+pullywog turns GitHub pull request and issue references in your agent's replies into live chips. It works in Claude Code and in Pi.
+
 ![pullywog](https://raw.githubusercontent.com/accodev/pullywog/screenshots/reply.png)
 
-pullywog is a Claude Code mod and a [Pi](https://pi.dev) extension that turns the GitHub pull request and issue references in the agent's replies into live chips. `#1234`, `owner/repo#1234`, GitHub URLs and the numbers in a table column headed `#`, `PR` or `Issue` get a dot in the state's color: green open, gray draft, purple merged, red closed. Hover a reference for its card: state, title, author, age, size, checks, reviews and open threads, each a link that Ctrl+click opens. A plain click tracks the PR in a band above the prompt, where the tracked PRs sit in three groups: needs you (your review is asked for, or your PR fails its checks or got changes requested), waiting, and done. Sessions in the same GitHub repo, worktrees included, share one tracked list. From the band one key acts on the selected PR: approve, request changes, re-run the failed checks, open it, copy its link as rich text for a chat such as Teams, or remove it. The details come from one `gh api graphql` call per repo, cached for 60 seconds.
+## How it works
+
+Every `#1234`, `owner/repo#1234` or GitHub link in a reply gets a dot in the state's color: green open, gray draft, purple merged, red closed. In Claude Code, so do the numbers in a table column headed `#`, `PR` or `Issue`.
+
+Hover a reference to open its card. The card shows the state, title, author, size, checks, reviews and open threads, and Ctrl+click opens any link in it.
+
+The details come from one `gh api graphql` call per repo, cached for 60 seconds.
+
+## Tracking PRs
+
+A plain click on a reference tracks it in a band above the prompt. The band sorts tracked PRs into three groups:
+
+- needs you: your review is asked for, or your own PR fails its checks or got changes requested
+- waiting: open, with nothing for you to do yet
+- done: merged or closed
+
+Sessions in the same GitHub repo share one list, worktrees included.
 
 ![The tracked PRs, with the keys for the selected one](https://raw.githubusercontent.com/accodev/pullywog/screenshots/band.png)
 
-![The card in the github style](https://raw.githubusercontent.com/accodev/pullywog/screenshots/card-github.png)
-
-## Install
-
-pullywog needs the GitHub CLI, `gh`, signed in to an account that can read the repos.
-
-```sh
-claude plugin marketplace add accodev/pullywog
-claude plugin install pullywog@pullywog
-```
-
-Run `/reload-plugins` in an open session to load it. pullywog is tested on Claude Code 2.1.327, and needs that version or later. The hover card needs fullscreen rendering: run `/tui fullscreen` once, or start Claude Code with `CLAUDE_CODE_NO_FLICKER=1`. Without it the dots and links show, and cards do not open.
-
-A click on a key under the chips runs it. For the keyboard, press the band focus key (Ctrl+X, then Tab, unless `abovePrompt:focus` is rebound in `~/.claude/keybindings.json`): ↑ ↓ (or Tab) move between chips, Esc goes back to the prompt, and one key acts on the focused chip.
+To act on a PR, move to the band with its focus key, pick a chip with ↑ ↓, and press one of these keys:
 
 | Key | Effect |
 |---|---|
@@ -27,75 +32,92 @@ A click on a key under the chips runs it. For the keyboard, press the band focus
 | `r` | Opens the PR to request changes, which need a comment. |
 | `f` | Re-runs the failed checks. |
 | `o` | Opens the PR or issue on GitHub. |
-| `c` | Copies the link as rich text, or plain text where rich text cannot go. |
+| `c` | Copies the link as rich text for chats such as Teams. |
 | `x` | Stops tracking it. |
 
-A click on the Tracked PRs bar folds the band to the bar and the count.
+In Claude Code the focus key is Ctrl+X, then Tab, unless `abovePrompt:focus` is bound to another key in `~/.claude/keybindings.json`. In Pi it is Alt+A. Esc goes back to the prompt.
 
-Before 0.8.0 the plugin was named pr-cards. To move over, remove the old one and its marketplace, then install as above:
+A click on the orange bar folds the band.
+
+## The card
+
+`cardStyle` picks one of two layouts. `card` is the full card shown at the top. `github` follows GitHub's own hover card, with the branches and a footer for the review and the checks.
+
+![The card in the github style](https://raw.githubusercontent.com/accodev/pullywog/screenshots/card-github.png)
+
+## Install
+
+pullywog needs the GitHub CLI, `gh`, signed in to an account that can read the repos.
+
+### Claude Code
 
 ```sh
-claude plugin uninstall pr-cards@pr-cards
-claude plugin marketplace remove pr-cards
+claude plugin marketplace add accodev/pullywog
+claude plugin install pullywog@pullywog
 ```
 
-The tracked lists live in the plugin's own store file under `~/.claude/plugins/store/`. To keep them, copy `pr-cards_pr-cards-*.json` over the new `pullywog_pullywog-*.json` once pullywog has run.
+Run `/reload-plugins` to load it. It needs Claude Code 2.1.327 or later.
 
-## Pi
+The cards need fullscreen rendering: run `/tui fullscreen` once. Without it the dots still show, but cards do not open.
+
+### Pi
 
 ```sh
 pi install npm:@accodev/pullywog
 ```
 
-Run `/reload` in an open session to load it. In Pi's fullscreen mode (`tuiMode`, the default) the extension works as the Claude Code mod: the dots, the card on hover, a plain click to track and Ctrl+click to open. Pi gives extensions no mouse hook in its transcript, so pullywog reads the mouse reports from the terminal input beside Pi, as `@narumitw/pi-inline` does. Pi's regular mode, tmux, Zellij and Screen send none: there the dots show, and the commands below stand in for the click.
+Run `/reload` to load it. In Pi's fullscreen mode it works as in Claude Code.
+
+Pi's regular mode, tmux, Zellij and Screen send no mouse events. There the dots still show, and these commands replace the clicks:
 
 | Command or key | Effect |
 |---|---|
-| `/track #1234` | Tracks a PR or issue: `#1234`, `owner/repo#1234` or a GitHub URL. With no argument it offers the references of this session's replies. |
+| `/track #1234` | Tracks a PR. With no argument it lists this session's references. |
 | `/untrack #1234` | Stops tracking it. |
-| `Alt+A` | Moves to the band: arrows pick a chip, the keys above act on it, Esc goes back. |
-
-Bare numbers in a table column headed `#`, `PR` or `Issue` get no dot in Pi. Pi has no orange theme key, so the bar takes the theme's accent color. The Pi extension keeps its tracked lists in `~/.pi/agent/pullywog.json`, apart from Claude Code's. Pi's `settings.json` takes the options below under a `pullywog` key, for example `"pullywog": { "cardStyle": "github" }`.
+| `Alt+A` | Moves to the band, where the keys above work. |
 
 ## Settings
 
-Claude Code keeps them in `settings.json`, under `pluginConfigs["pullywog@pullywog"].options`. Set them in `/plugin`, or from the shell:
+| Option | Default | Effect |
+|---|---|---|
+| `cardStyle` | `card` | `card` or `github`, as shown above. |
+| `trackedBand` | `true` | Shows the band of tracked PRs. |
+| `bandPerRow` | `3` | Tracked PRs in a row of a group, 1 to 6. |
+| `shareTracked` | `true` | One list per repo. Off, each session keeps its own. |
+
+In Claude Code, set them in `/plugin`, or from the shell:
 
 ```sh
 echo '{"cardStyle": "github"}' | claude plugin configure pullywog@pullywog --values-stdin
 ```
 
-| Option | Default | Effect |
-|---|---|---|
-| `cardStyle` | `card` | `card` draws the full card: state, title, author, size, checks, reviews and threads. `github` follows GitHub's own hover card: repo and date, state with title and number, branches, then the review and checks. |
-| `trackedBand` | `true` | Shows the band of tracked PRs above the prompt. Off, a click on a reference does nothing. |
-| `bandPerRow` | `3` | Tracked PRs in a row of a group, 1 to 6. |
-| `shareTracked` | `true` | Gives the sessions of one GitHub repo, or of one folder outside git, one tracked list. Off, each session keeps its own. |
+In Pi, put them under a `pullywog` key in `settings.json`, for example `"pullywog": { "cardStyle": "github" }`.
 
 ## Development
+
+The checks that CI runs on every push and pull request:
 
 ```sh
 claude plugin validate .
 claude plugin test .
-```
-
-```sh
 npm ci
 npm run typecheck:pi
 npm run test:pi
 ```
 
-Those check the Pi extension in `pi/`. CI runs all five commands on every push to `main` and on pull requests. On `main` it also renders the README images with `scripts/screenshots.mjs` and pushes them to the `screenshots` branch.
+The end-to-end tests drive real Claude Code and Pi sessions in a terminal. A fake model writes the replies, so they need no API key:
+
+```sh
+uv run --no-project --with pyte --with pywinpty python -I scripts/e2e.py
+uv run --no-project --with pyte --with pywinpty python -I scripts/pi-e2e.py
+```
+
+On Linux and macOS, use `ptyprocess` in place of `pywinpty`. CI runs both on every pull request that touches `hooks/` or `pi/`.
+
+The README images come from `scripts/screenshots.mjs`, which draws them on made-up repos and people:
 
 ```sh
 node --experimental-strip-types scripts/screenshots.mjs out
 ```
 
-That renders them locally, with Chrome or Edge. The scenes use pullywog's own drawing code on made-up repos and people.
-
-```sh
-uv run --no-project --with pyte --with pywinpty python -I scripts/e2e.py       # ptyprocess in place of pywinpty on Linux and macOS
-uv run --no-project --with pyte --with pywinpty python -I scripts/pi-e2e.py
-```
-
-Those drive a real fullscreen Claude Code or Pi session in a pseudo-terminal: they hover and click references, track PRs, use the band's keys, and check the screen. A fake model in `scripts/e2e_kit.py` writes the replies, so they need no API key. The references point at pullywog's own PRs, which `gh` reads. The `e2e` workflow runs both on every PR that touches `hooks/` or `pi/`. The design notes are in `docs/handover.md`, the repo rules in `AGENTS.md`.
+The design notes are in `docs/handover.md`, the repo rules in `AGENTS.md`.
