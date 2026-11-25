@@ -1,6 +1,7 @@
 {
   "name": "pr-cards",
-  "version": "0.7.5",
+  "version": "0.7.6",
+  "engines": { "claude-code": ">=2.1.327" },
   "license": "MIT",
   "description": "GitHub pull request chips with hover cards in the Claude Code transcript.",
   "userConfig": {

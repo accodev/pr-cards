@@ -26,5 +26,8 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 
 - Conventional Commits. One PR per change, CI green, rebase merge.
 - Bump `version` in `.claude-plugin/plugin.json` on a behavior change.
+- Tag each release with `claude plugin tag --push`, which makes `pr-cards--v<version>`. Install and update read these tags to give an older Claude Code the newest version that fits its `engines` range.
+- Raise `engines["claude-code"]` in `plugin.json` only when a release needs a newer build for the whole plugin. Keep it out of `marketplace.json`: Claude Code 2.0.15 to 2.1.75 reject a marketplace whose entry has it.
+- A feature on a newer API switches itself off on older builds. Wrap a new `$` call in try/catch, because a missing call throws a TypeError where it is made. Hook a new event through a pattern such as `prompt.*` and test `next.event`, because an unknown event name refuses the whole module.
 - Comments say why, never what.
 - Source files and `plugin.json` are CRLF. Other JSON, YAML and Markdown files are LF.
