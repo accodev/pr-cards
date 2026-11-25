@@ -94,8 +94,8 @@ node --experimental-strip-types scripts/screenshots.mjs out
 That renders them locally, with Chrome or Edge. The scenes use pullywog's own drawing code on made-up repos and people.
 
 ```sh
-uv run --no-project --with pywinpty --with pyte python -I scripts/e2e.py <folder of a GitHub repo>
-uv run --no-project --with pywinpty --with pyte python -I scripts/pi-e2e.py <folder of a GitHub repo>
+uv run --no-project --with pyte --with pywinpty python -I scripts/e2e.py       # ptyprocess in place of pywinpty on Linux and macOS
+uv run --no-project --with pyte --with pywinpty python -I scripts/pi-e2e.py
 ```
 
-Those drive a real fullscreen Claude Code or Pi session in a pseudo-terminal: they hover and click references, track a PR, and check the screen. The PR and issue numbers they use are at the top of each script. The design notes are in `docs/handover.md`, the repo rules in `AGENTS.md`.
+Those drive a real fullscreen Claude Code or Pi session in a pseudo-terminal: they hover and click references, track PRs, use the band's keys, and check the screen. A fake model in `scripts/e2e_kit.py` writes the replies, so they need no API key. The references point at pullywog's own PRs, which `gh` reads. The `e2e` workflow runs both on every PR that touches `hooks/` or `pi/`. The design notes are in `docs/handover.md`, the repo rules in `AGENTS.md`.

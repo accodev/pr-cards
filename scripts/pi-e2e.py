@@ -1,125 +1,126 @@
-"""Drives a real Pi session with only the pullywog extension, then checks the band, the keys, the dots,
+"""Drives a real Pi session with only the pullywog extension, then checks the band, its keys, the dots,
 the hover card and the click that tracks a reference.
 
-Run from the repo root, with the folder of a GitHub repo that has PR 1306 and issue 1250 (fiskaltrust/market-it):
-    uv run --no-project --with pywinpty --with pyte python -I scripts/pi-e2e.py C:/code/market-it
-It tracks PR 1306 and issue 1250 and removes them again; it presses no action key that reaches GitHub.
+A fake model (scripts/e2e_kit.py) gives the reply through a custom provider, so no API key is needed.
+The references point at pullywog's own PRs, which `gh` reads. Run from the repo root:
+    uv run --no-project --with pyte --with pywinpty python -I scripts/pi-e2e.py      (Windows)
+    uv run --no-project --with pyte --with ptyprocess python -I scripts/pi-e2e.py    (Linux, macOS)
 Each screen is saved as text in scripts/e2e-out/. Exit code 0 means every check passed.
 """
-import os, sys, threading, time
-import pyte
-from winpty import PtyProcess
+import json, os, re, subprocess, sys, time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I leaves the script's folder off the path
+from e2e_kit import REPO, Terminal, base_env, scratch, start_model
 
 PLUGIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CWD = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
-OUT = os.path.join(PLUGIN, "scripts", "e2e-out")
 ROWS, COLS = 45, 140
+A, B = 30, 32  # merged PRs of pullywog that stay put
 
-os.makedirs(OUT, exist_ok=True)
 sys.stdout.reconfigure(encoding="utf-8")
-screen = pyte.Screen(COLS, ROWS)
-stream = pyte.ByteStream(screen)
-lock = threading.Lock()
-cmd = ["pi", "-ne", "-e", os.path.join(PLUGIN, "pi", "index.ts"), "--no-session"]
-proc = PtyProcess.spawn(cmd, cwd=CWD, dimensions=(ROWS, COLS))
+model = start_model({"PULLYWOG_E2E_REPLY": f"PR #{A} fixed issue #{B}."}, "model-pi.log")
+
+# A fresh agent folder: the fake model as the only provider, and its own tracked list.
+agent = scratch("pi")
+with open(os.path.join(agent, "models.json"), "w", encoding="utf-8") as f:
+    json.dump({"providers": {"fake": {"baseUrl": model, "api": "anthropic-messages", "apiKey": "fake",
+                                      "models": [{"id": "fake-model"}]}}}, f)
+with open(os.path.join(agent, "settings.json"), "w", encoding="utf-8") as f:
+    json.dump({"defaultProvider": "fake", "defaultModel": "fake-model", "tuiMode": "fullscreen"}, f)
+env = base_env()
+env["PI_CODING_AGENT_DIR"] = agent
+term = Terminal(["pi", "-ne", "-e", os.path.join(PLUGIN, "pi", "index.ts"), "--no-session"], PLUGIN, env, ROWS, COLS, prefix="pi-")
+checks = {}
 
 
-def reader():
-    while proc.isalive():
-        try:
-            data = proc.read(65536)
-        except EOFError:
-            break
-        b = data.encode("utf-8", "surrogatepass") if isinstance(data, str) else data
-        with lock:
-            stream.feed(b)
-
-
-threading.Thread(target=reader, daemon=True).start()
-
-
-def text():
-    with lock:
-        return "\n".join(screen.display)
-
-
-def dump(name):
-    with open(os.path.join(OUT, "pi-" + name + ".txt"), "w", encoding="utf-8") as f:
-        f.write(text())
-
-
-def wait(pred, timeout, label):
-    end = time.time() + timeout
-    while time.time() < end:
-        if pred(text()):
-            dump(label)
-            return True
-        time.sleep(0.5)
-    dump("fail-" + label)
-    print("TIMEOUT", label)
-    return False
-
-
-def find(s):
-    for y, line in enumerate(text().split("\n")):
-        x = line.find(s)
-        if x >= 0:
-            return x + 1, y + 1
+def band_chip(number):
+    for row, line in enumerate(term.text().split("\n")):
+        if f"#{number} " in line and line.startswith("      ") and "⬤" in line:
+            return line.index(f"#{number}") + 2, row + 1
     return None
 
 
-def send(s):
-    for ch in s:
-        proc.write(ch)
-        time.sleep(0.02)
+def selected():
+    for n in (A, B):
+        at = band_chip(n)
+        if at:
+            row = term.text().split("\n")[at[1] - 1]
+            if row[at[0] - 2 - 3] == "▎":  # a ▎ three cells before the #
+                return n
+    return None
 
 
-checks = {}
+def untrack(n):
+    term.send(f"/untrack #{n}")
+    time.sleep(0.5)
+    term.write("\r")  # the first Enter takes the completion menu's entry, the second runs the command
+    time.sleep(0.5)
+    term.write("\r")
+    time.sleep(1)
+
+
 try:
     time.sleep(8)
-    send("/track #1306")
+    term.send(f"/track #{A}")
     time.sleep(0.5)
-    proc.write("\r")
-    checks["band"] = wait(lambda t: "Tracked PRs" in t and "#1306" in t, 40, "band")
+    term.write("\r")
+    checks["band"] = term.wait(lambda t: "Tracked PRs" in t and f"#{A}" in t, 40, "band")
     # The chip loads its title from GitHub: more than the number shows.
-    checks["chip loaded"] = wait(lambda t: any("#1306 " in l and "○" not in l and ("waiting" in l or "needs you" in l or "done" in l) for l in t.split("\n")), 40, "chip")
-    proc.write("\x1ba")  # Alt+A
-    checks["keys"] = wait(lambda t: "x remove" in t and "esc back" in t, 15, "keys")
-    proc.write("\x1b")
-    time.sleep(1.5)
-    checks["back"] = wait(lambda t: "x remove" not in t and "Tracked PRs" in t, 15, "back")
-    send("Reply with exactly this sentence and use no tools: PR #1306 fixed issue #1250.")
-    proc.write("\r")
-    checks["dots"] = wait(lambda t: any("⬤ #1306" in l and "⬤ #1250" in l for l in t.split("\n")), 120, "dots")
-    # The pointer rests on #1250 in the reply: its card opens with the repo and the issue's URL.
-    at = find("⬤ #1250")
+    checks["chip loaded"] = term.wait(lambda t: any(f"#{A} " in l and "○" not in l and ("waiting" in l or "needs you" in l or "done" in l)
+                                                    for l in t.split("\n")), 40, "chip")
+
+    term.send("PULLYWOG_E2E_REPLY")
+    time.sleep(0.5)
+    term.write("\r")
+    checks["dots"] = term.wait(lambda t: any(f"⬤ #{A}" in l and f"⬤ #{B}" in l and "fixed" in l for l in t.split("\n")), 60, "dots")
+    at = term.find(f"⬤ #{B}")
     if at:
         x, y = at[0] + 3, at[1]
-        proc.write(f"\x1b[<35;{x};{y}M")
-        checks["hover card"] = wait(lambda t: "github.com/fiskaltrust/market-it/issues/1250" in t, 20, "hover")
-        proc.write(f"\x1b[<35;{x};{max(1, y - 30)}M")
-        checks["card closes"] = wait(lambda t: "github.com/fiskaltrust/market-it/issues/1250" not in t, 10, "unhover")
-        # A plain click on the reference tracks it.
-        proc.write(f"\x1b[<0;{x};{y}M")
-        proc.write(f"\x1b[<0;{x};{y}m")
-        checks["click tracks"] = wait(lambda t: any("#1250 " in l and ("waiting" in l or "done" in l or "needs you" in l or l.startswith(" " * 16)) for l in t.split("\n")), 20, "click")
-        send("/untrack #1250")
-        time.sleep(0.5)
-        proc.write("\r")
-        time.sleep(0.5)
-        proc.write("\r")
-        time.sleep(1)
+        term.write(f"\x1b[<35;{x};{y}M")  # the pointer rests on #B
+        checks["hover card"] = term.wait(lambda t: f"github.com/{REPO}/pull/{B}" in t, 20, "hover")
+        term.write(f"\x1b[<35;{x};{max(1, y - 30)}M")
+        checks["card closes"] = term.wait(lambda t: f"github.com/{REPO}/pull/{B}" not in t, 10, "unhover")
+        term.write(f"\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m")  # a plain click tracks it
+        checks["click tracks"] = term.wait(lambda t: band_chip(B) is not None, 20, "click")
     else:
         checks["hover card"] = False
-    send("/untrack #1306")
-    time.sleep(0.5)
-    # The first Enter takes the completion menu's entry, the second runs the command.
-    proc.write("\r")
-    time.sleep(0.5)
-    proc.write("\r")
-    checks["untracked"] = wait(lambda t: "Tracked PRs" not in t, 20, "untracked")
+
+    # Alt+A gives the band the keyboard: ↓ moves the selection, c copies, x removes, Esc goes back.
+    term.write("\x1ba")
+    checks["keys"] = term.wait(lambda t: "x remove" in t and "esc back" in t, 15, "keys")
+    before = after = selected()
+    # ↓ stops at the last chip, ↑ at the first: whichever can move, moves.
+    for key in ("\x1b[B", "\x1b[A"):
+        term.write(key)
+        time.sleep(1)
+        after = selected()
+        if after != before:
+            break
+    term.dump("arrow")
+    print("selected after Alt+A:", before, "after an arrow:", after)
+    checks["arrows move the selection"] = before is not None and after is not None and before != after
+    term.write("c")
+    time.sleep(4)
+    if sys.platform == "win32":
+        clip = subprocess.run(["powershell.exe", "-NoProfile", "-Command",
+                               "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Clipboard -TextFormatType Html | Select-Object -Last 1; '---'; Get-Clipboard -TextFormatType UnicodeText"],
+                              capture_output=True, encoding="utf-8").stdout
+        checks["c copies a rich-text link"] = f"#{after}</a>" in clip and f"/{after}" in clip.split("---")[-1]
+    else:
+        checks["c copies"] = term.wait(lambda t: f"copied {REPO}#{after}" in t, 10, "copied")
+    term.write("x")
+    time.sleep(2)
+    term.dump("removed")
+    checks["x removes the selected chip"] = after is not None and band_chip(after) is None and band_chip(A if after == B else B) is not None
+    term.write("\x1b")
+    time.sleep(1.5)
+    checks["esc goes back"] = term.wait(lambda t: "x remove" not in t, 15, "back")
+
+    for n in (A, B):
+        if band_chip(n):
+            untrack(n)
+    checks["untracked"] = term.wait(lambda t: "Tracked PRs" not in t, 20, "untracked")
 finally:
-    proc.terminate(force=True)
+    term.stop()
 
 for name, ok in checks.items():
     print(("PASS " if ok else "FAIL ") + name)
