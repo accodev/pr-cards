@@ -1,6 +1,6 @@
 {
   "name": "@accodev/pullywog",
-  "version": "0.9.1",
+  "version": "1.0.0",
   "description": "GitHub pull request tracking for Claude Code and Pi.",
   "license": "MIT",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "pullywog",
-  "version": "0.9.1",
+  "version": "1.0.0",
   "engines": { "claude-code": ">=2.1.327" },
   "license": "MIT",
   "description": "GitHub pull request chips with hover cards in the Claude Code transcript.",
