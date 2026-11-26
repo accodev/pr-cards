@@ -108,11 +108,12 @@ npm run test:pi
 The end-to-end tests drive real Claude Code and Pi sessions in a terminal. A fake model writes the replies, so they need no API key:
 
 ```sh
-uv run --no-project --with pyte --with pywinpty python -I scripts/e2e.py
-uv run --no-project --with pyte --with pywinpty python -I scripts/pi-e2e.py
+npm ci
+npm run e2e:claude
+npm run e2e:pi
 ```
 
-On Linux and macOS, use `ptyprocess` in place of `pywinpty`. CI runs both on every pull request that touches `claude/` or `pi/`.
+Each screen is saved as text in `e2e-out/`. CI runs both on every pull request that touches `claude/`, `pi/` or `tests/e2e/`.
 
 The README images come from `scripts/screenshots.ts`, which draws them on made-up repos and people:
 
