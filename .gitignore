@@ -3,7 +3,7 @@
 node_modules/
 *.bak*
 scripts/e2e-out/
-# Rendered by scripts/screenshots.mjs; CI pushes them to the screenshots branch.
+# Rendered by scripts/screenshots.ts; CI pushes them to the screenshots branch.
 screenshots/
 out/
 .e2e/

@@ -1,12 +1,12 @@
 name: screenshots
 
-# Renders the README images with scripts/screenshots.mjs and pushes them to the `screenshots`
+# Renders the README images with scripts/screenshots.ts and pushes them to the `screenshots`
 # branch. That branch is outside the ruleset on `main`, so the push needs no PR and no check run.
 on:
   push:
     branches: [main]
   pull_request:
-    paths: [pi/**, scripts/screenshots.mjs, .github/workflows/screenshots.yml]
+    paths: [pi/**, scripts/screenshots.ts, .github/workflows/screenshots.yml]
   workflow_dispatch:
 
 permissions:
@@ -43,7 +43,7 @@ jobs:
       - name: Render
         env:
           CHROME: google-chrome
-        run: node --experimental-strip-types --no-warnings scripts/screenshots.mjs out
+        run: node --experimental-strip-types --no-warnings scripts/screenshots.ts out
 
       - uses: actions/upload-artifact@v5
         with:
