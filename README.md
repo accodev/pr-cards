@@ -112,7 +112,7 @@ uv run --no-project --with pyte --with pywinpty python -I scripts/e2e.py
 uv run --no-project --with pyte --with pywinpty python -I scripts/pi-e2e.py
 ```
 
-On Linux and macOS, use `ptyprocess` in place of `pywinpty`. CI runs both on every pull request that touches `hooks/` or `pi/`.
+On Linux and macOS, use `ptyprocess` in place of `pywinpty`. CI runs both on every pull request that touches `claude/` or `pi/`.
 
 The README images come from `scripts/screenshots.mjs`, which draws them on made-up repos and people:
 
