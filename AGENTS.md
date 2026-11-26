@@ -4,7 +4,7 @@ pullywog (named pr-cards before 0.8.0) is a Claude Code mod and a Pi extension. 
 
 ## Feature parity: the first rule
 
-pullywog does the same in every agent it supports: Claude Code (`hooks/`) and Pi (`pi/`). A change to what it shows or does lands in both in the same PR, with tests in each. A PR that changes one agent alone does not merge. A host that cannot do a feature at all is the only exception, and the PR names the missing host API. Pi 1.6.0 has no mouse hook inside the transcript: `pi/pointer.ts` reads the mouse reports from stdin instead, so the hover card and the click that tracks a reference work in both.
+pullywog does the same in every agent it supports: Claude Code (`claude/`) and Pi (`pi/`). A change to what it shows or does lands in both in the same PR, with tests in each. A PR that changes one agent alone does not merge. A host that cannot do a feature at all is the only exception, and the PR names the missing host API. Pi 1.6.0 has no mouse hook inside the transcript: `pi/pointer.ts` reads the mouse reports from stdin instead, so the hover card and the click that tracks a reference work in both.
 
 ## Check
 
@@ -17,7 +17,7 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 
 ## Hooks
 
-- `hooks/hooks.json` loads `hooks/register.tsx` only. Client modules (the Alt-to-pin chip) stay out of it.
+- `claude/hooks.json` loads `claude/register.tsx` only. `plugin.json` points Claude Code at it with `"hooks": "./claude/hooks.json"`, since Claude Code looks in `hooks/` by default. Client modules (the Alt-to-pin chip) stay out of it.
 - Register each event once, or each time with its own matcher. A second `on` of the same event without one throws.
 - No `import()`, `require`, Node or DOM. Use `$.process`, `$.http`, `$.store` and `$.clock`.
 - Colors come from `ansi256(n)` with n below 16 on the terminal, or theme keys elsewhere. Never hex.
@@ -29,7 +29,7 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 - `pi/pointer.ts` reads SGR mouse reports from `process.stdin` beside Pi's own reader, because Pi's fullscreen mode takes them before `onTerminalInput`. It finds the reference under the pointer in `TuiAltScreen.getScreenLines()` and shows the card with `tui.showOverlay({ nonCapturing: true })`. References in replies stay text, not links: Pi opens a link on any click.
 - Pi tests live in `pi/tests.ts`. A `*.test.ts` name would make `claude plugin test` run them with the Claude Code test kit.
 - Check with `npm ci`, `npm run typecheck:pi` and `npm run test:pi`. CI runs them after the Claude Code steps.
-- `scripts/e2e.py` and `scripts/pi-e2e.py` drive real Claude Code and Pi sessions. `scripts/e2e_kit.py` holds what they share: a fake Anthropic Messages server with fixed replies, so no API key, and a pseudo-terminal on pywinpty (Windows) or ptyprocess. Each run gets a fresh agent config folder. The `e2e` workflow runs both on Linux for PRs that touch `hooks/`, `pi/` or the scripts. References point at pullywog's own PRs; no work repo goes into a script.
+- `scripts/e2e.py` and `scripts/pi-e2e.py` drive real Claude Code and Pi sessions. `scripts/e2e_kit.py` holds what they share: a fake Anthropic Messages server with fixed replies, so no API key, and a pseudo-terminal on pywinpty (Windows) or ptyprocess. Each run gets a fresh agent config folder. The `e2e` workflow runs both on Linux for PRs that touch `claude/`, `pi/` or the scripts. References point at pullywog's own PRs; no work repo goes into a script.
 - Bump `version` in `package.json` with the one in `plugin.json`.
 - The Pi extension is on npm as `@accodev/pullywog`. `publish.yml` stages each new version through npm trusted publishing; a maintainer approves it with 2FA on npmjs.com. After the approval, check that the `latest` dist-tag points at the new version.
 
