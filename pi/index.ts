@@ -6,7 +6,7 @@ import { matchesKey, type Component, type TUI } from '@earendil-works/pi-tui'
 import { CARD_WIDTH, cardLines, errorCard } from './card.ts'
 import { watchPointer } from './pointer.ts'
 import {
-  BATCH, TTL_MS, bandLines, decorate, findRefs, keyFor, label, linkFormats, listName, pruned, query, refAt, runIds, sameList, savedItems, step,
+  BATCH, bandLines, fresh, readGh, decorate, findRefs, keyFor, label, linkFormats, listName, pruned, query, refAt, runIds, sameList, savedItems, step,
   toItem, withTracked, withoutTracked, type Band, type Entry, type Hit, type Raw, type Ref, type SavedList, type Style, type Tracked,
 } from './prs.ts'
 
@@ -125,7 +125,7 @@ export default function pullywog(pi: ExtensionAPI) {
     if (repo === null) return
     const key = keyFor(repo, r.number)
     const hit = cache.get(key)
-    if (!force && hit && (hit.loading || Date.now() - hit.at < TTL_MS)) return
+    if (!force && fresh(hit)) return
     cache.set(key, { ...hit, at: Date.now(), loading: true })
     queue.set(repo, (queue.get(repo) ?? new Set()).add(r.number))
     if (flushQueued) return
@@ -151,11 +151,14 @@ export default function pullywog(pi: ExtensionAPI) {
   }
 
   async function fetchChunk(repo: string, numbers: number[]) {
-    const fail = (error: string) => numbers.forEach((n) => cache.set(keyFor(repo, n), { at: Date.now(), loading: false, error }))
+    // A failure keeps the last good answer on the chip and the card, and only marks it for a retry.
+    const fail = (error: string) => numbers.forEach((n) => cache.set(keyFor(repo, n), { ...cache.get(keyFor(repo, n)), at: Date.now(), loading: false, error }))
     // The query goes in on stdin: a batch of 40 passes Windows' 32,767-character command line.
     const out = await run(['gh', 'api', 'graphql', '--input', '-'], { stdin: JSON.stringify({ query: query(repo, numbers) }) })
     try {
-      const body = JSON.parse(out.stdout || '{}') as { data?: { viewer?: { login: string }; repository?: Record<string, Raw | null> | null }; errors?: { message: string }[] }
+      const read = readGh<{ data?: { viewer?: { login: string }; repository?: Record<string, Raw | null> | null }; errors?: { message: string }[] }>(out.stdout, out.stderr, out.code)
+      if ('error' in read) return fail(read.error)
+      const body = read.body
       viewer = body.data?.viewer?.login ?? viewer
       const found = body.data?.repository
       if (!found) return fail(body.errors?.[0]?.message ?? (out.stderr.trim().split('\n')[0] || `gh exited ${out.code}`))

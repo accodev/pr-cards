@@ -36,6 +36,19 @@ type Entry = { item?: Item; error?: string; missing?: boolean; at: number; loadi
 type Ref = { repo: string | null; number: number; label: string }
 
 const TTL_MS = 60_000
+// A failed fetch tries again sooner than a good one: GitHub's 5xx pages pass in seconds.
+const ERROR_TTL_MS = 10_000
+const fresh = (e: { at: number; loading: boolean; error?: string } | undefined, now = Date.now()) => !!e && (e.loading || now - e.at < (e.error ? ERROR_TTL_MS : TTL_MS))
+
+// On a GitHub 5xx, gh prints the HTML error page on stdout and `HTTP 502` on stderr: name the
+// failure from stderr and never show the page or the JSON parser's complaint about it.
+function readGh<T>(stdout: string, stderr: string, code: number): { body: T } | { error: string } {
+  try {
+    return { body: JSON.parse(stdout || '{}') as T }
+  } catch {
+    return { error: `GitHub sent no data (${stderr.trim().split('\n')[0] || `gh exited ${code}`})` }
+  }
+}
 const BATCH = 40
 // `#1234`, `owner/repo#1234` or a GitHub pull or issue URL; a `#` after a word character, `[`, `#` or `/` is a heading, an anchor or a link label.
 const REF = /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:pull|issues)\/(\d+)|(?<![\w[#/])(?:([\w.-]+\/[\w.-]+))?#(\d+)\b/g
@@ -390,7 +403,7 @@ function want($: EngineInterface, ref: Ref) {
   if (repo === null) return
   const key = keyFor(repo, ref.number)
   const hit = cache.get(key)
-  if (hit && (hit.loading || Date.now() - hit.at < TTL_MS)) return
+  if (fresh(hit)) return
   cache.set(key, { ...hit, at: Date.now(), loading: true })
   const numbers = queue.get(repo) ?? new Set<number>()
   queue.set(repo, numbers.add(ref.number))
@@ -428,12 +441,15 @@ async function flush($: EngineInterface) {
 async function fetchChunk($: EngineInterface, repo: string, numbers: number[]) {
   const [owner, name] = repo.split('/')
   const query = `query { viewer { login } repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${numbers.map((n) => `n${n}: issueOrPullRequest(number: ${n}) { ${FIELDS} }`).join('\n')} } }`
-  const fail = (error: string) => numbers.forEach((n) => cache.set(keyFor(repo, n), { at: Date.now(), loading: false, error }))
+  // A failure keeps the last good answer on the chip and the card, and only marks it for a retry.
+  const fail = (error: string) => numbers.forEach((n) => cache.set(keyFor(repo, n), { ...cache.get(keyFor(repo, n)), at: Date.now(), loading: false, error }))
   try {
     // The query goes in on stdin: about 900 characters a PR, so a batch of 40 (36,000) passes
     // Windows' 32,767-character command line, and gh would not start.
     const out = await $.process.run(['gh', 'api', 'graphql', '--input', '-'], { stdin: JSON.stringify({ query }), timeoutMs: 20_000 })
-    const body = JSON.parse(out.stdout || '{}') as { data?: { viewer?: { login: string }; repository?: Record<string, Raw | null> | null }; errors?: { message: string }[] }
+    const read = readGh<{ data?: { viewer?: { login: string }; repository?: Record<string, Raw | null> | null }; errors?: { message: string }[] }>(out.stdout, out.stderr, out.exitCode)
+    if ('error' in read) return fail(read.error)
+    const body = read.body
     viewer = body.data?.viewer?.login ?? viewer
     const found = body.data?.repository
     if (!found) return fail(body.errors?.[0]?.message ?? (out.stderr.trim().split('\n')[0] || `gh exited ${out.exitCode}`))
@@ -693,7 +709,8 @@ export const register: Register = (on, options) => {
       if (entry?.missing) return span(ref.label)
       const item = entry?.item
       // A gray filled dot is a draft; loading is hollow and a failed lookup a cross, so neither reads as a state.
-      const dot = item ? span(`${DOT} `, color(item)) : entry?.error ? span('x ', C.closed) : span('○ ', C.dim)
+      // Gray when GitHub did not answer: a dot keeps the last state it knew, an x had none.
+      const dot = item ? span(`${DOT} `, entry?.error ? C.dim : color(item)) : span(entry?.error ? 'x ' : '○ ', C.dim)
       const label = item
         ? Markdown({
             key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})`,
@@ -916,7 +933,7 @@ export const register: Register = (on, options) => {
       const entry = cache.get(key)
       const item = entry?.item
       const runs: Run[] = []
-      if (!item) runs.push({ text: `${entry?.error ? 'x' : '○'} `, color: entry?.error ? C.closed : C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
+      if (!item) runs.push({ text: `${entry?.error ? 'x' : '○'} `, color: C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
       else {
         const c = item.checks
         const tail: Run[] = [
@@ -928,7 +945,7 @@ export const register: Register = (on, options) => {
         // The title takes what the chip has left after the marker, dot, number, author, age, checks and one cell of space.
         const room = Math.max(4, CHIP - 3 - head.length - tail.reduce((n, r) => n + r.text.length, 0) - 1)
         const title = item.title.length > room ? `${item.title.slice(0, room - 1)}…` : item.title
-        runs.push({ text: `${DOT} `, color: color(item) }, { text: head, color: C.link, bold: true }, { text: title }, ...tail)
+        runs.push({ text: `${DOT} `, color: entry?.error ? C.dim : color(item) }, { text: head, color: C.link, bold: true }, { text: title }, ...tail)
       }
       const used = 1 + runs.reduce((n, r) => n + r.text.length, 0)
       // No × on the chip: x (or a click on `x: remove`) removes the selected one.

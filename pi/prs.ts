@@ -36,6 +36,19 @@ export type Tracked = { repo: string; number: number }
 export type SavedList = { at: number; items: Tracked[] }
 
 export const TTL_MS = 60_000
+// A failed fetch tries again sooner than a good one: GitHub's 5xx pages pass in seconds.
+export const ERROR_TTL_MS = 10_000
+export const fresh = (e: { at: number; loading: boolean; error?: string } | undefined, now = Date.now()) => !!e && (e.loading || now - e.at < (e.error ? ERROR_TTL_MS : TTL_MS))
+
+// On a GitHub 5xx, gh prints the HTML error page on stdout and `HTTP 502` on stderr: name the
+// failure from stderr and never show the page or the JSON parser's complaint about it.
+export function readGh<T>(stdout: string, stderr: string, code: number): { body: T } | { error: string } {
+  try {
+    return { body: JSON.parse(stdout || '{}') as T }
+  } catch {
+    return { error: `GitHub sent no data (${stderr.trim().split('\n')[0] || `gh exited ${code}`})` }
+  }
+}
 export const BATCH = 40
 // A saved list goes once no session has used it for this long.
 export const TRACKED_TTL_MS = 14 * 86_400_000
@@ -81,7 +94,8 @@ export function decorate(md: string, lookup: (r: Ref) => Entry | undefined): str
     const entry = lookup(f)
     if (!entry || entry.missing) continue
     const item = entry.item
-    const dot = item ? paint(toneOf(item), DOT) : entry.error ? paint('closed', 'x') : paint('dim', '○')
+    // Gray when GitHub did not answer: a dot keeps the last state it knew, an x had none.
+    const dot = item ? paint(entry.error ? 'dim' : toneOf(item), DOT) : paint('dim', entry.error ? 'x' : '○')
     const text = f.url ? `${f.repo}#${f.number}` : md.slice(f.start, f.end)
     out += md.slice(at, f.start) + `${dot} ${paint('link', text)}`
     at = f.end
@@ -266,7 +280,7 @@ export function chipWidth(columns: number, perRow: number) {
 export function chip(t: Tracked, entry: Entry | undefined, width: number, selected: boolean, s: Style): string {
   const item = entry?.item
   const runs: { text: string; tone?: Tone; bold?: boolean }[] = []
-  if (!item) runs.push({ text: `${entry?.error ? 'x' : '○'} `, tone: entry?.error ? 'closed' : 'dim' }, { text: `#${t.number}`, tone: 'link', bold: true })
+  if (!item) runs.push({ text: `${entry?.error ? 'x' : '○'} `, tone: 'dim' }, { text: `#${t.number}`, tone: 'link', bold: true })
   else {
     const c = item.checks
     const tail = [
@@ -276,7 +290,7 @@ export function chip(t: Tracked, entry: Entry | undefined, width: number, select
     ]
     const head = `#${t.number} `
     const room = Math.max(4, width - 3 - head.length - tail.reduce((n, r) => n + r.text.length, 0) - 1)
-    runs.push({ text: `${DOT} `, tone: toneOf(item) }, { text: head, tone: 'link', bold: true }, { text: cut(item.title, room) }, ...tail)
+    runs.push({ text: `${DOT} `, tone: entry?.error ? 'dim' : toneOf(item) }, { text: head, tone: 'link', bold: true }, { text: cut(item.title, room) }, ...tail)
   }
   const used = 1 + runs.reduce((n, r) => n + r.text.length, 0)
   const body = runs.map((r) => {
