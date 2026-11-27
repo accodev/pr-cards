@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fc from 'fast-check'
 import {
   DOT, paint, bandLines, cfHtml, chip, chipWidth, decorate, findRefs, groupOf, keyFor, keysFor, listName, plainCells, pruned, query, refAt, sameList, step, toItem,
   withTracked, withoutTracked, fresh, readGh, TRACKED_TTL_MS, TTL_MS, type Band, type Entry, type Item, type Raw, type Style, type Tracked,
@@ -21,6 +22,27 @@ const entry = (i: Item): Entry => ({ item: i, at: Date.now(), loading: false })
 test('finds #N, owner/repo#N and GitHub URLs, and skips code, links and headings', () => {
   const md = 'See #12 and acme/shop#58, https://github.com/acme/pos-api/pull/1319, `#7`, [#8](https://x.y/8), a#9 and ##10'
   assert.deepEqual(findRefs(md).map((f) => [f.repo, f.number, f.url]), [[null, 12, false], ['acme/shop', 58, false], ['acme/pos-api', 1319, true]])
+})
+
+// Replies are free text from a model: random input must neither throw nor shift a reference's offsets.
+test('findRefs on random text: every match spans its own reference', () => {
+  fc.assert(fc.property(fc.string({ unit: 'binary', maxLength: 300 }), (md) => {
+    // Leading zeros stay in the text: #007 is number 7.
+    for (const f of findRefs(md)) assert.match(md.slice(f.start, f.end), new RegExp(`${f.url ? '/' : '#'}0*${f.number}$`))
+  }))
+})
+
+test('findRefs finds owner/repo#N anywhere between plain words', () => {
+  const name = fc.stringMatching(/^[a-z0-9][a-z0-9.-]{0,11}$/)
+  const words = fc.array(fc.stringMatching(/^[a-zA-Z0-9,.!?]{1,8}$/), { maxLength: 6 }).map((w) => w.join(' '))
+  fc.assert(fc.property(name, name, fc.integer({ min: 1, max: 999_999 }), words, words, (owner, repo, number, before, after) => {
+    const found = findRefs(`${before} ${owner}/${repo}#${number} ${after}`)
+    assert.deepEqual(found.map((f) => [f.repo, f.number]), [[`${owner}/${repo}`, number]])
+  }))
+})
+
+test('decorate leaves text alone when no reference is known', () => {
+  fc.assert(fc.property(fc.string({ maxLength: 300 }), (md) => assert.equal(decorate(md, () => undefined), md)))
 })
 
 test('decorates references with a dot: the state once loaded, hollow while loading, x on error', () => {

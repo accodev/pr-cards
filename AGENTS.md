@@ -13,7 +13,7 @@ claude plugin validate .
 claude plugin test .
 ```
 
-CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, because the mod API can change between releases.
+CI runs both on the Claude Code build in `.github/tools/test/package.json` (2.1.327, Node 22). Raise it only on purpose, because the mod API can change between releases: edit the version, then run `npm install --package-lock-only` in that folder. `.github/tools/release` pins the build `publish.yml` tags with. Dependabot leaves both folders alone.
 
 ## Hooks
 
@@ -27,7 +27,7 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 - `pi/index.ts` is the Pi extension, loaded through `pi.extensions` in `package.json`. It draws the band with `ctx.ui.setWidget` above the editor, the dots with `pi.registerMarkdownTransformer`, and takes the keyboard with `ctx.ui.custom` on `Alt+A`.
 - `pi/prs.ts` holds what needs no Pi host: finding references, the query, the tracked list and the band's lines. `pi/card.ts` draws the hover card. Both run under `node --test` as they are.
 - `pi/pointer.ts` reads SGR mouse reports from `process.stdin` beside Pi's own reader, because Pi's fullscreen mode takes them before `onTerminalInput`. It finds the reference under the pointer in `TuiAltScreen.getScreenLines()` and shows the card with `tui.showOverlay({ nonCapturing: true })`. References in replies stay text, not links: Pi opens a link on any click.
-- Pi tests live in `pi/tests.ts`. A `*.test.ts` name would make `claude plugin test` run them with the Claude Code test kit.
+- Pi tests live in `pi/tests.ts`. A `*.test.ts` name would make `claude plugin test` run them with the Claude Code test kit. Parsers of model text (`findRefs`, `decorate`) also get fast-check property tests there.
 - Check with `npm ci`, `npm run typecheck:pi` and `npm run test:pi`. CI runs them after the Claude Code steps.
 - `tests/e2e/claude.spec.ts` and `tests/e2e/pi.spec.ts` drive real Claude Code and Pi sessions: `npm run e2e:claude` and `npm run e2e:pi`. `tests/e2e/kit.ts` holds what they share: a pseudo-terminal on `@lydell/node-pty` (plain `node-pty` 1.1.0 has no Linux prebuild) read into an `@xterm/headless` screen. `tests/e2e/model.ts` is a fake Anthropic Messages server with fixed replies, so no API key. Each run gets a fresh agent config folder and saves its screens in `e2e-out/`. The `.spec.ts` names keep them out of `claude plugin test`. The `e2e` workflow runs both on Linux for PRs that touch `claude/`, `pi/` or `tests/e2e/`. References point at pullywog's own PRs; no work repo goes into a test.
 - Bump `version` in `package.json` with the one in `plugin.json`.
@@ -39,7 +39,7 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 
 ## Ship
 
-- Conventional Commits. One PR per change, CI green, rebase merge.
+- Conventional Commits. One PR per change, CI green, rebase merge. The `main` ruleset asks for 2 approvals; a repo admin merges with `gh pr merge --rebase --admin`, which works only through a PR.
 - Size each PR as a release and bump `version` in `plugin.json` and `package.json` in the same PR:
   - MAJOR: a breaking change, marked `!` in the type. Examples: a removed or renamed setting or key, a changed command, a raised `engines["claude-code"]` or Pi peer range.
   - MINOR: `feat`, something users can see or do that is new.
@@ -51,4 +51,4 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 - README images come from `scripts/screenshots.ts`, which draws fixed scenes with `pi/prs.ts` and `pi/card.ts` on made-up repos and people. The `screenshots` workflow renders them on `main` and pushes them to the `screenshots` branch. No real repo, PR or person goes into an image.
 - Workflows pin each action to a commit SHA with the version in a comment, and give write permissions per job. Dependabot updates the pins. `scorecard.yml` publishes the OpenSSF Scorecard behind the README badge.
 - Comments say why, never what.
-- Source files and `plugin.json` are CRLF. Other JSON, YAML and Markdown files are LF.
+- All files are LF.
