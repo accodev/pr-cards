@@ -68,6 +68,18 @@ test('draws references in text and in a numbers column with a dot, a link and th
   expect(link?.props.pressableLinks).toEqual([PR.url])
 })
 
+test('shows a GitHub error page as a short failure, never as the JSON parse error', async ($, on) => {
+  const clock = mock.clock(on)
+  const page = '<html>\r\n<head><title>502 Bad Gateway</title></head></html>'
+  on('process.run', ($, e) => (e.argv[1] === 'repo' ? ok('acme/pos-api\n') : { value: { exitCode: 1, stdout: page, stderr: 'gh: HTTP 502\n', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const ui = await $.ui.mount(message('See #1319.'))
+  await clock.settle()
+  await clock.settle()
+  const texts = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
+  expect(texts.filter((t) => t.startsWith('x'))).toHaveLength(1)
+  expect(JSON.stringify(ui.tree ?? texts)).not.toContain('SyntaxError')
+})
+
 test('wraps a card row whose word fills the row exactly', async ($, on) => {
   const clock = mock.clock(on)
   // 62 letters fill a card row; the space after them once looped forever and crashed the hooks worker.

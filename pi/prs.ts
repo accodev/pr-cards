@@ -36,6 +36,19 @@ export type Tracked = { repo: string; number: number }
 export type SavedList = { at: number; items: Tracked[] }
 
 export const TTL_MS = 60_000
+// A failed fetch tries again sooner than a good one: GitHub's 5xx pages pass in seconds.
+export const ERROR_TTL_MS = 10_000
+export const fresh = (e: { at: number; loading: boolean; error?: string } | undefined, now = Date.now()) => !!e && (e.loading || now - e.at < (e.error ? ERROR_TTL_MS : TTL_MS))
+
+// On a GitHub 5xx, gh prints the HTML error page on stdout and `HTTP 502` on stderr: name the
+// failure from stderr and never show the page or the JSON parser's complaint about it.
+export function readGh<T>(stdout: string, stderr: string, code: number): { body: T } | { error: string } {
+  try {
+    return { body: JSON.parse(stdout || '{}') as T }
+  } catch {
+    return { error: `GitHub sent no data (${stderr.trim().split('\n')[0] || `gh exited ${code}`})` }
+  }
+}
 export const BATCH = 40
 // A saved list goes once no session has used it for this long.
 export const TRACKED_TTL_MS = 14 * 86_400_000
