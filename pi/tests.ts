@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   bandLines, cfHtml, chip, chipWidth, decorate, findRefs, groupOf, keyFor, keysFor, listName, plainCells, pruned, query, refAt, sameList, step, toItem,
-  withTracked, withoutTracked, TRACKED_TTL_MS, type Band, type Entry, type Item, type Raw, type Style, type Tracked,
+  withTracked, withoutTracked, fresh, readGh, TRACKED_TTL_MS, TTL_MS, type Band, type Entry, type Item, type Raw, type Style, type Tracked,
 } from './prs.ts'
 import { CARD_WIDTH, cardLines, errorCard } from './card.ts'
 import { readReport } from './pointer.ts'
@@ -172,4 +172,21 @@ test('CF_HTML offsets count UTF-8 bytes', () => {
   const bytes = Buffer.from(html, 'utf8')
   assert.equal(bytes.subarray(at('StartFragment'), at('EndFragment')).toString('utf8'), '<a href="u">ä</a>')
   assert.equal(at('EndHTML'), bytes.length)
+})
+
+test('names a GitHub error page from gh\'s stderr, never the JSON parse error', () => {
+  const page = '<html>\r\n<head><title>502 Bad Gateway</title></head></html>'
+  assert.deepEqual(readGh(page, 'gh: HTTP 502\n', 1), { error: 'GitHub sent no data (gh: HTTP 502)' })
+  assert.deepEqual(readGh(page, '', 0), { error: 'GitHub sent no data (gh exited 0)' })
+  assert.deepEqual(readGh('{"data":{}}', '', 0), { body: { data: {} } })
+})
+
+test('retries a failed fetch after 10 seconds and a good one after the TTL', () => {
+  const now = 1_000_000
+  assert.equal(fresh({ at: now - 11_000, loading: false, error: 'x' }, now), false)
+  assert.equal(fresh({ at: now - 9_000, loading: false, error: 'x' }, now), true)
+  assert.equal(fresh({ at: now - 11_000, loading: false }, now), true)
+  assert.equal(fresh({ at: now - TTL_MS - 1, loading: false }, now), false)
+  assert.equal(fresh({ at: 0, loading: true }, now), true)
+  assert.equal(fresh(undefined, now), false)
 })

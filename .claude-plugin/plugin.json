@@ -1,6 +1,6 @@
 {
   "name": "pullywog",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "engines": { "claude-code": ">=2.1.327" },
   "hooks": "./claude/hooks.json",
   "license": "MIT",
