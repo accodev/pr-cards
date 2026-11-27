@@ -17,10 +17,6 @@ concurrency:
   group: publish
   cancel-in-progress: false
 
-env:
-  # 2.1.332 is the build checked to have `claude plugin tag`; ci.yml pins the build the mod is tested on.
-  CLAUDE_CODE_VERSION: 2.1.332
-
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -49,9 +45,12 @@ jobs:
           fi
           echo "version=$plugin" >> "$GITHUB_OUTPUT"
 
+      # From the lockfile in .github/tools/release, pinned by hash. Installed outside the checkout: claude plugin validate counts the plugin's files.
       - name: Install Claude Code
-        run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-
+        run: |
+          cp .github/tools/release/package.json .github/tools/release/package-lock.json "$RUNNER_TEMP"
+          npm ci --prefix "$RUNNER_TEMP" --no-audit --no-fund
+          echo "$RUNNER_TEMP/node_modules/.bin" >> "$GITHUB_PATH"
       # claude plugin tag checks that plugin.json and the marketplace entry agree before it tags.
       - name: Tag unless the tag exists
         env:
@@ -91,12 +90,9 @@ jobs:
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: 22
+          # Node 24 ships npm 11.19, and staged publishing needs npm 11.15.0 or later.
+          node-version: 24
           registry-url: https://registry.npmjs.org
-
-      # Staged publishing needs npm 11.15.0 or later; Node 22 ships npm 10.
-      - name: Update npm
-        run: npm install --global npm@^11.15.0
 
       - name: Install the Pi extension's dev packages
         run: npm ci
