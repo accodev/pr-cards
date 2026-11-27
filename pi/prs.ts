@@ -61,8 +61,9 @@ export const keyFor = (repo: string, number: number) => `${repo.toLowerCase()}#$
 export const label = (r: Ref) => (r.repo ? `${r.repo}#${r.number}` : `#${r.number}`)
 
 // Code spans and blocks, and link labels and targets, hold no references to draw: blank them out
-// with spaces, so offsets in the masked text match the original.
-const mask = (md: string) => md.replace(/```[\s\S]*?```|`[^`\n]*`|\[[^\]\n]*\]\([^)\n]*\)/g, (m) => ' '.repeat(m.length))
+// with spaces, so offsets in the masked text match the original. A label stops at the next `[` and a target
+// at the next `(`, so a reply full of `[` or `[](` takes linear time.
+const mask = (md: string) => md.replace(/```[\s\S]*?```|`[^`\n]*`|\[[^[\]\n]*\]\([^()\n]*\)/g, (m) => ' '.repeat(m.length))
 
 export type Found = Ref & { start: number; end: number; url: boolean }
 

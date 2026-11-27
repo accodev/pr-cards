@@ -41,6 +41,19 @@ test('findRefs finds owner/repo#N anywhere between plain words', () => {
   }))
 })
 
+test('findRefs takes linear time on a reply full of [ or [](', () => {
+  for (const unit of ['[', '[](', '[a](b']) {
+    const md = unit.repeat(50_000) + ' #12'
+    const t = performance.now()
+    assert.deepEqual(findRefs(md).map((f) => f.number), [12])
+    assert.ok(performance.now() - t < 500, `${unit} took ${performance.now() - t} ms`)
+  }
+})
+
+test('findRefs skips references inside a link, also next to a stray [', () => {
+  assert.deepEqual(findRefs('[#1](u) [a [#2](u) #3').map((f) => f.number), [3])
+})
+
 test('decorate leaves text alone when no reference is known', () => {
   fc.assert(fc.property(fc.string({ maxLength: 300 }), (md) => assert.equal(decorate(md, () => undefined), md)))
 })
