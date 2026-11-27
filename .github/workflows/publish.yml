@@ -10,6 +10,9 @@ on:
   # Retries a run that failed after the tag or the release: each step skips what already exists.
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: publish
   cancel-in-progress: false
@@ -27,11 +30,11 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 22
 
@@ -84,9 +87,9 @@ jobs:
       # npm trusted publishing trades the workflow's OIDC token for a publish token: no NPM_TOKEN secret to leak.
       id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org

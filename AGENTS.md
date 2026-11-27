@@ -49,5 +49,6 @@ CI runs both on Claude Code 2.1.327 (Node 22). Raise the pin only on purpose, be
 - Raise `engines["claude-code"]` in `plugin.json` only when a release needs a newer build for the whole plugin. Keep it out of `marketplace.json`: Claude Code 2.0.15 to 2.1.75 reject a marketplace whose entry has it.
 - A feature on a newer API switches itself off on older builds. Wrap a new `$` call in try/catch, because a missing call throws a TypeError where it is made. Hook a new event through a pattern such as `prompt.*` and test `next.event`, because an unknown event name refuses the whole module.
 - README images come from `scripts/screenshots.ts`, which draws fixed scenes with `pi/prs.ts` and `pi/card.ts` on made-up repos and people. The `screenshots` workflow renders them on `main` and pushes them to the `screenshots` branch. No real repo, PR or person goes into an image.
+- Workflows pin each action to a commit SHA with the version in a comment, and give write permissions per job. Dependabot updates the pins. `scorecard.yml` publishes the OpenSSF Scorecard behind the README badge.
 - Comments say why, never what.
 - Source files and `plugin.json` are CRLF. Other JSON, YAML and Markdown files are LF.
