@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: screenshots
@@ -24,10 +24,13 @@ jobs:
   render:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      # Pushes the images to the screenshots branch.
+      contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 22
 
@@ -45,7 +48,7 @@ jobs:
           CHROME: google-chrome
         run: node --experimental-strip-types --no-warnings scripts/screenshots.ts out
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: screenshots
           path: out
