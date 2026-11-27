@@ -122,19 +122,21 @@ function loadTracked($: EngineInterface) {
   })().catch(() => undefined)
 }
 
-// A shared list changes in other sessions too: read it again, at most every SHARED_READ_MS.
+// A shared list changes in other sessions too: read it again, at most every SHARED_READ_MS. The
+// session may have moved to another folder since: then its list is the new folder's.
 function rereadTracked($: EngineInterface) {
   if (!shareTracked || !listKey || Date.now() - listReadAt < SHARED_READ_MS) return
   listReadAt = Date.now()
-  const key = listKey
-  void $.store.get(key).then((saved) => {
-    const items = savedItems(saved)
+  void (async () => {
+    const key = await trackedKey($)
+    const items = savedItems(await $.store.get(key))
     const same = items.length === tracked.length && items.every((t, i) => keyFor(t.repo, t.number) === keyFor(tracked[i]!.repo, tracked[i]!.number))
-    if (same || key !== listKey) return
+    if (same && key === listKey) return
+    listKey = key
     tracked = items
     if (selected && !tracked.some((t) => keyFor(t.repo, t.number) === selected)) selected = null
     $.ui.invalidate('ui.render')
-  }).catch(() => undefined)
+  })().catch(() => undefined)
 }
 
 // Applies one change to the list as the store holds it now, not to this session's copy: a copy
@@ -354,20 +356,32 @@ function blockRefs(b: Block): Ref[] {
 // ---------- Loading from GitHub ----------
 
 let cwdRepoAsking: Promise<string | null> | null = null
+// The folder cwdRepo answers for.
+let cwdRepoDir: string | undefined
 
 function askCwdRepo($: EngineInterface) {
   void cwdRepoNow($)
 }
 
-// The session folder's GitHub repo, asked of gh once.
-function cwdRepoNow($: EngineInterface): Promise<string | null> {
-  if (cwdRepo !== undefined) return Promise.resolve(cwdRepo)
-  if (cwdRepoAsking) return cwdRepoAsking
-  cwdRepoAsking = $.process.run(['gh', 'repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { timeoutMs: 15_000 })
-    .then((out) => (cwdRepo = out.exitCode === 0 && out.stdout.trim() ? out.stdout.trim() : null))
-    .catch(() => (cwdRepo = null))
-    .finally(() => $.ui.invalidate('ui.render'))
-  return cwdRepoAsking
+// The session folder's GitHub repo, asked of gh once per folder. /cd, a worktree or the host can
+// move a session to another folder, and with it to another repo and tracked list.
+async function cwdRepoNow($: EngineInterface): Promise<string | null> {
+  // No folder to read (a host without it): gh runs in the session's own, as before.
+  const dir = await $.session.cwd().catch(() => '')
+  if (dir === cwdRepoDir && cwdRepo !== undefined) return cwdRepo
+  if (dir === cwdRepoDir && cwdRepoAsking) return cwdRepoAsking
+  cwdRepoDir = dir
+  cwdRepo = undefined
+  const asking = $.process.run(['gh', 'repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { ...(dir ? { cwd: dir } : {}), timeoutMs: 15_000 })
+    .then((out) => (out.exitCode === 0 && out.stdout.trim() ? out.stdout.trim() : null))
+    .catch(() => null)
+    .then((repo) => {
+      if (cwdRepoDir === dir) cwdRepo = repo
+      $.ui.invalidate('ui.render')
+      return repo
+    })
+  cwdRepoAsking = asking
+  return asking
 }
 
 function want($: EngineInterface, ref: Ref) {

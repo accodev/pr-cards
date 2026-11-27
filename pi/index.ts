@@ -419,6 +419,8 @@ export default function pullywog(pi: ExtensionAPI) {
 
   pi.on('session_start', async (_e, c) => {
     ctx = c
+    // A new or resumed session can run in another folder: its repo, and so its list, is asked again.
+    if (c.cwd !== cwd) cwdRepo = undefined
     cwd = c.cwd
     sessionId = c.sessionManager.getSessionId()
     settings = readSettings((pi.getSettings() as Record<string, unknown>).pullywog)
