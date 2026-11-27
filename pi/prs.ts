@@ -94,7 +94,8 @@ export function decorate(md: string, lookup: (r: Ref) => Entry | undefined): str
     const entry = lookup(f)
     if (!entry || entry.missing) continue
     const item = entry.item
-    const dot = item ? paint(toneOf(item), DOT) : entry.error ? paint('closed', 'x') : paint('dim', '○')
+    // Gray when GitHub did not answer: a dot keeps the last state it knew, an x had none.
+    const dot = item ? paint(entry.error ? 'dim' : toneOf(item), DOT) : paint('dim', entry.error ? 'x' : '○')
     const text = f.url ? `${f.repo}#${f.number}` : md.slice(f.start, f.end)
     out += md.slice(at, f.start) + `${dot} ${paint('link', text)}`
     at = f.end
@@ -279,7 +280,7 @@ export function chipWidth(columns: number, perRow: number) {
 export function chip(t: Tracked, entry: Entry | undefined, width: number, selected: boolean, s: Style): string {
   const item = entry?.item
   const runs: { text: string; tone?: Tone; bold?: boolean }[] = []
-  if (!item) runs.push({ text: `${entry?.error ? 'x' : '○'} `, tone: entry?.error ? 'closed' : 'dim' }, { text: `#${t.number}`, tone: 'link', bold: true })
+  if (!item) runs.push({ text: `${entry?.error ? 'x' : '○'} `, tone: 'dim' }, { text: `#${t.number}`, tone: 'link', bold: true })
   else {
     const c = item.checks
     const tail = [
@@ -289,7 +290,7 @@ export function chip(t: Tracked, entry: Entry | undefined, width: number, select
     ]
     const head = `#${t.number} `
     const room = Math.max(4, width - 3 - head.length - tail.reduce((n, r) => n + r.text.length, 0) - 1)
-    runs.push({ text: `${DOT} `, tone: toneOf(item) }, { text: head, tone: 'link', bold: true }, { text: cut(item.title, room) }, ...tail)
+    runs.push({ text: `${DOT} `, tone: entry?.error ? 'dim' : toneOf(item) }, { text: head, tone: 'link', bold: true }, { text: cut(item.title, room) }, ...tail)
   }
   const used = 1 + runs.reduce((n, r) => n + r.text.length, 0)
   const body = runs.map((r) => {

@@ -78,6 +78,8 @@ test('shows a GitHub error page as a short failure, never as the JSON parse erro
   const texts = (await ui.findAll({ type: 'Text' })).map((t) => String(t.text))
   expect(texts.filter((t) => t.startsWith('x'))).toHaveLength(1)
   expect(JSON.stringify(ui.tree ?? texts)).not.toContain('SyntaxError')
+  // Gray, as the dot of an answer that did not refresh: GitHub failed, the PR did not.
+  expect((await ui.find({ type: 'Text', text: 'x ' }))?.props.color).toBe('ansi256(8)')
 })
 
 test('wraps a card row whose word fills the row exactly', async ($, on) => {

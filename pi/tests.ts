@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  bandLines, cfHtml, chip, chipWidth, decorate, findRefs, groupOf, keyFor, keysFor, listName, plainCells, pruned, query, refAt, sameList, step, toItem,
+  DOT, paint, bandLines, cfHtml, chip, chipWidth, decorate, findRefs, groupOf, keyFor, keysFor, listName, plainCells, pruned, query, refAt, sameList, step, toItem,
   withTracked, withoutTracked, fresh, readGh, TRACKED_TTL_MS, TTL_MS, type Band, type Entry, type Item, type Raw, type Style, type Tracked,
 } from './prs.ts'
 import { CARD_WIDTH, cardLines, errorCard } from './card.ts'
@@ -189,4 +189,12 @@ test('retries a failed fetch after 10 seconds and a good one after the TTL', () 
   assert.equal(fresh({ at: now - TTL_MS - 1, loading: false }, now), false)
   assert.equal(fresh({ at: 0, loading: true }, now), true)
   assert.equal(fresh(undefined, now), false)
+})
+
+test('draws a gray dot for a stale answer and a gray x for none when GitHub does not answer', () => {
+  const open = item({ number: 7, state: 'OPEN' })
+  const at = Date.now()
+  assert.ok(decorate('#7', () => ({ item: open, at, loading: false })).includes(paint('open', DOT)))
+  assert.ok(decorate('#7', () => ({ item: open, error: 'GitHub sent no data (gh: HTTP 502)', at, loading: false })).includes(paint('dim', DOT)))
+  assert.ok(decorate('#7', () => ({ error: 'GitHub sent no data (gh: HTTP 502)', at, loading: false })).includes(paint('dim', 'x')))
 })

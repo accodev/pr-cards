@@ -695,7 +695,8 @@ export const register: Register = (on, options) => {
       if (entry?.missing) return span(ref.label)
       const item = entry?.item
       // A gray filled dot is a draft; loading is hollow and a failed lookup a cross, so neither reads as a state.
-      const dot = item ? span(`${DOT} `, color(item)) : entry?.error ? span('x ', C.closed) : span('○ ', C.dim)
+      // Gray when GitHub did not answer: a dot keeps the last state it knew, an x had none.
+      const dot = item ? span(`${DOT} `, entry?.error ? C.dim : color(item)) : span(entry?.error ? 'x ' : '○ ', C.dim)
       const label = item
         ? Markdown({
             key: `${id}-link-${serial}`, text: `[${ref.label}](${item.url})`,
@@ -918,7 +919,7 @@ export const register: Register = (on, options) => {
       const entry = cache.get(key)
       const item = entry?.item
       const runs: Run[] = []
-      if (!item) runs.push({ text: `${entry?.error ? 'x' : '○'} `, color: entry?.error ? C.closed : C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
+      if (!item) runs.push({ text: `${entry?.error ? 'x' : '○'} `, color: C.dim }, { text: `#${t.number}`, color: C.link, bold: true })
       else {
         const c = item.checks
         const tail: Run[] = [
@@ -930,7 +931,7 @@ export const register: Register = (on, options) => {
         // The title takes what the chip has left after the marker, dot, number, author, age, checks and one cell of space.
         const room = Math.max(4, CHIP - 3 - head.length - tail.reduce((n, r) => n + r.text.length, 0) - 1)
         const title = item.title.length > room ? `${item.title.slice(0, room - 1)}…` : item.title
-        runs.push({ text: `${DOT} `, color: color(item) }, { text: head, color: C.link, bold: true }, { text: title }, ...tail)
+        runs.push({ text: `${DOT} `, color: entry?.error ? C.dim : color(item) }, { text: head, color: C.link, bold: true }, { text: title }, ...tail)
       }
       const used = 1 + runs.reduce((n, r) => n + r.text.length, 0)
       // No × on the chip: x (or a click on `x: remove`) removes the selected one.
