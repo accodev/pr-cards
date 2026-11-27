@@ -1,5 +1,12 @@
 # pullywog
 
+[![npm](https://img.shields.io/npm/v/@accodev/pullywog)](https://www.npmjs.com/package/@accodev/pullywog)
+[![npm downloads](https://img.shields.io/npm/dm/@accodev/pullywog)](https://www.npmjs.com/package/@accodev/pullywog)
+[![ci](https://github.com/accodev/pullywog/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/accodev/pullywog/actions/workflows/ci.yml)
+[![e2e](https://github.com/accodev/pullywog/actions/workflows/e2e.yml/badge.svg?branch=main)](https://github.com/accodev/pullywog/actions/workflows/e2e.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/accodev/pullywog/badge)](https://scorecard.dev/viewer/?uri=github.com/accodev/pullywog)
+[![license](https://img.shields.io/github/license/accodev/pullywog)](LICENSE)
+
 pullywog turns GitHub pull request and issue references in your agent's replies into live chips. It works in Claude Code and in Pi.
 
 ![pullywog](https://raw.githubusercontent.com/accodev/pullywog/screenshots/reply.png)
