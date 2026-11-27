@@ -434,6 +434,42 @@ test('a folder outside git keeps one tracked list for its sessions', async ($, o
   expect(await band.find({ key: 'pullywog-select-acme/pos-api#1319' })).toBeDefined()
 })
 
+test('a session that moves to another folder switches to that folder\'s tracked list', async ($, on) => {
+  const clock = mock.clock(on)
+  const store: Record<string, unknown> = {
+    'tracked.repo.acme/pos-api': { at: Date.now(), items: [{ repo: 'acme/pos-api', number: 1319 }] },
+    'tracked.dir./work/notes': { at: Date.now(), items: [{ repo: 'acme/pos-api', number: 1250 }] },
+  }
+  on('store.get', ($, e) => ({ value: store[e.key] }) as never)
+  on('store.set', ($, e) => ((store[e.key] = e.value), { value: undefined }) as never)
+  on('store.delete', ($, e) => (delete store[e.key], { value: undefined }) as never)
+  on('store.keys', () => ({ value: Object.keys(store) }) as never)
+  on('session.id', () => ({ value: 'session-d' }))
+  let cwd = '/work/pos'
+  on('session.cwd', () => ({ value: cwd }))
+  // Only /work/pos is a clone of acme/pos-api; /work/notes is no git repo.
+  on('process.run', ($, e) => {
+    if (e.argv[1] !== 'repo') return ok(JSON.stringify({ data: { viewer: { login: 'me' }, repository: { n1319: PR, n1250: ISSUE } } }))
+    return e.init?.cwd === '/work/pos' ? ok('acme/pos-api\n') : { value: { exitCode: 1, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  const band = await $.ui.mount({
+    plugin: 'pullywog', component: 'AbovePrompt', requestId: 'AbovePrompt', surface: 'terminal',
+    viewport: { columns: 120, rows: 40 },
+    props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 115 },
+  } as never)
+  await clock.settle()
+  await clock.settle()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1319' })).toBeDefined()
+
+  // /cd to a folder outside git: the timer that rereads the shared list picks the folder's list.
+  cwd = '/work/notes'
+  await clock.advance(5_000)
+  await clock.settle()
+  await clock.settle()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1250' })).toBeDefined()
+  expect(await band.find({ key: 'pullywog-select-acme/pos-api#1319' })).toBeUndefined()
+})
+
 test('sends the query on stdin, so 40 references fit past the Windows command-line limit', async ($, on) => {
   const clock = mock.clock(on)
   const calls: { argv: string[]; stdin: string }[] = []
